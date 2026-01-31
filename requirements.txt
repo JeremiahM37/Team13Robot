@@ -1,0 +1,8 @@
+# Robot Control System Dependencies
+
+# Web framework
+flask>=2.0.0
+
+# Maestro servo controller (if not already installed)
+# Install manually: pip install maestro
+# Or copy maestro.py from Pololu if needed

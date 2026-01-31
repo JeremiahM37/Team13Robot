@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Robot Control</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Robot Control</h1>
+            <div id="status" class="status disconnected">Connecting...</div>
+        </header>
+
+        <main>
+            <!-- Drive Control Section -->
+            <section class="control-section">
+                <h2>Drive</h2>
+                <div class="joystick-container">
+                    <div id="joystick" class="joystick">
+                        <div id="joystick-knob" class="joystick-knob"></div>
+                    </div>
+                    <div class="joystick-info">
+                        <span>X: <span id="joystick-x">0.00</span></span>
+                        <span>Y: <span id="joystick-y">0.00</span></span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Head Control Section -->
+            <section class="control-section">
+                <h2>Head</h2>
+                <div class="slider-group">
+                    <label for="head-tilt">Tilt (Up/Down)</label>
+                    <input type="range" id="head-tilt" min="0" max="100" value="50">
+                    <span id="head-tilt-value">50%</span>
+                </div>
+                <div class="slider-group">
+                    <label for="head-pan">Pan (Left/Right)</label>
+                    <input type="range" id="head-pan" min="0" max="100" value="50">
+                    <span id="head-pan-value">50%</span>
+                </div>
+            </section>
+
+            <!-- Waist Control Section -->
+            <section class="control-section">
+                <h2>Waist</h2>
+                <div class="slider-group">
+                    <label for="waist">Rotation</label>
+                    <input type="range" id="waist" min="0" max="100" value="50">
+                    <span id="waist-value">50%</span>
+                </div>
+            </section>
+
+            <!-- Voice Control Section -->
+            <section class="control-section">
+                <h2>Voice</h2>
+                <div class="voice-buttons">
+                    {% for phrase in phrases %}
+                    <button class="voice-btn" data-phrase-index="{{ loop.index0 }}">
+                        {{ phrase }}
+                    </button>
+                    {% endfor %}
+                </div>
+            </section>
+
+            <!-- Emergency Stop -->
+            <section class="control-section">
+                <button id="stop-btn" class="stop-btn">STOP</button>
+            </section>
+        </main>
+
+        <footer>
+            <small>Last update: <span id="last-update">--</span></small>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='joystick.js') }}"></script>
+    <script src="{{ url_for('static', filename='control.js') }}"></script>
+</body>
+</html>
