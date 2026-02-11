@@ -68,6 +68,33 @@ class RobotController:
         """Clamp a value to the specified range."""
         return max(min_val, min(max_val, value))
 
+    def _speed_to_servo(self, wheel_name, speed):
+        """
+        Convert a -1.0 to 1.0 speed to a servo value, skipping the deadband.
+
+        Speed 0 = center (stopped).
+        Speed 0.01..1.0 = forward (maps to forward_min..forward_max, going BELOW center).
+        Speed -0.01..-1.0 = reverse (maps to reverse_min..reverse_max, going ABOVE center).
+        """
+        limits = SERVO_LIMITS[wheel_name]
+        center = limits['center']
+
+        if abs(speed) < 0.01:
+            return center
+
+        abs_speed = abs(speed)
+
+        if speed > 0:
+            # Forward: map 0..1 to forward_min..forward_max (values decrease)
+            fwd_min = limits['forward_min']  # 5000 (slowest forward)
+            fwd_max = limits['forward_max']  # 4000 (fastest forward)
+            return fwd_min + abs_speed * (fwd_max - fwd_min)
+        else:
+            # Reverse: map 0..1 to reverse_min..reverse_max (values increase)
+            rev_min = limits['reverse_min']  # 6900 (slowest reverse)
+            rev_max = limits['reverse_max']  # 7000 (fastest reverse)
+            return rev_min + abs_speed * (rev_max - rev_min)
+
     def _set_servo(self, channel_name, value):
         """
         Set a servo to a specific value with safety checks.
@@ -151,14 +178,9 @@ class RobotController:
         left_speed = self._clamp(float(left_speed), -1.0, 1.0)
         right_speed = self._clamp(float(right_speed), -1.0, 1.0)
 
-        # Convert -1 to 1 range to servo units
-        left_limits = SERVO_LIMITS['left_wheel']
-        right_limits = SERVO_LIMITS['right_wheel']
-
-        # Map speed to servo range
-        # Note: You may need to invert one wheel depending on mounting orientation
-        left_value = left_limits['center'] + (left_speed * (left_limits['max'] - left_limits['center']))
-        right_value = right_limits['center'] + (right_speed * (right_limits['max'] - right_limits['center']))
+        # Convert -1 to 1 range to servo units, skipping the deadband
+        left_value = self._speed_to_servo('left_wheel', left_speed)
+        right_value = self._speed_to_servo('right_wheel', right_speed)
 
         self._set_servo('left_wheel', left_value)
         self._set_servo('right_wheel', right_value)
@@ -324,58 +346,82 @@ class SafetyWatchdog:
 if __name__ == "__main__":
     """
     Direct test of robot control layer.
-    Run this script directly to test without Flask.
+    Run this script directly to test with real hardware.
+    All movements are short pulses that auto-stop.
+    Press Ctrl+C to emergency stop.
     """
+    import signal
+
+    robot = None
+
+    def emergency_stop(*args):
+        print("\n\nEMERGENCY STOP")
+        if robot:
+            robot.stop_all()
+            robot.close()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, emergency_stop)
+    signal.signal(signal.SIGTERM, emergency_stop)
+
     print("=" * 50)
-    print("Robot Control Layer - Direct Test")
+    print("Robot Control Layer - Hardware Test")
     print("=" * 50)
+    print("Short 0.8s pulses. Ctrl+C to emergency stop.\n")
 
-    # Create controller
-    robot = RobotController(simulation_mode=True)  # Set False to test real hardware
+    robot = RobotController(simulation_mode=False)
 
-    print("\nTesting drive functions...")
-    robot.drive(0.5, 0.5)   # Forward
-    time.sleep(0.5)
-    robot.drive(-0.5, -0.5) # Backward
-    time.sleep(0.5)
-    robot.drive(0.5, -0.5)  # Turn right
-    time.sleep(0.5)
+    input("Press ENTER to test FORWARD (both wheels)...")
+    robot.drive(0.5, 0.5)
+    time.sleep(0.8)
     robot.stop_wheels()
+    print("  Stopped.\n")
 
-    print("\nTesting joystick drive...")
-    robot.drive_joystick(0, 0.5)   # Forward
-    time.sleep(0.5)
-    robot.drive_joystick(0.5, 0)   # Turn right
-    time.sleep(0.5)
-    robot.drive_joystick(0.3, 0.7) # Forward and slight right
-    time.sleep(0.5)
+    input("Press ENTER to test BACKWARD (both wheels)...")
+    robot.drive(-0.5, -0.5)
+    time.sleep(0.8)
     robot.stop_wheels()
+    print("  Stopped.\n")
 
-    print("\nTesting head control...")
-    robot.set_head_tilt(0.0)  # Min
-    time.sleep(0.3)
-    robot.set_head_tilt(1.0)  # Max
-    time.sleep(0.3)
-    robot.set_head_tilt(0.5)  # Center
+    input("Press ENTER to test TURN RIGHT...")
+    robot.drive(0.5, -0.5)
+    time.sleep(0.8)
+    robot.stop_wheels()
+    print("  Stopped.\n")
 
-    robot.set_head_pan(0.0)   # Left
-    time.sleep(0.3)
-    robot.set_head_pan(1.0)   # Right
-    time.sleep(0.3)
-    robot.set_head_pan(0.5)   # Center
+    input("Press ENTER to test TURN LEFT...")
+    robot.drive(-0.5, 0.5)
+    time.sleep(0.8)
+    robot.stop_wheels()
+    print("  Stopped.\n")
 
-    print("\nTesting waist control...")
+    input("Press ENTER to test HEAD TILT...")
+    robot.set_head_tilt(0.0)
+    time.sleep(0.8)
+    robot.set_head_tilt(1.0)
+    time.sleep(0.8)
+    robot.set_head_tilt(0.5)
+    print("  Done.\n")
+
+    input("Press ENTER to test HEAD PAN...")
+    robot.set_head_pan(0.0)
+    time.sleep(0.8)
+    robot.set_head_pan(1.0)
+    time.sleep(0.8)
+    robot.set_head_pan(0.5)
+    print("  Done.\n")
+
+    input("Press ENTER to test WAIST...")
     robot.set_waist(0.0)
-    time.sleep(0.3)
+    time.sleep(0.8)
     robot.set_waist(1.0)
-    time.sleep(0.3)
+    time.sleep(0.8)
     robot.set_waist(0.5)
+    print("  Done.\n")
 
-    print("\nTesting stop all...")
     robot.stop_all()
+    robot.close()
 
-    print("\nStatus:", robot.get_status())
-
-    print("\n" + "=" * 50)
-    print("Direct test complete!")
+    print("=" * 50)
+    print("All tests complete!")
     print("=" * 50)

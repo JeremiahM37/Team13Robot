@@ -95,8 +95,8 @@ class HardwareTester:
         self._set_servo(right_ch, right_limits['center'], "right stop")
         time.sleep(0.5)
 
-        print("  Testing LEFT wheel FORWARD (slow)...")
-        forward_val = left_limits['center'] + 200
+        print("  Testing LEFT wheel FORWARD...")
+        forward_val = left_limits.get('forward_min', 5000)
         self._set_servo(left_ch, forward_val, "left forward")
         time.sleep(1.5)
 
@@ -106,8 +106,8 @@ class HardwareTester:
         else:
             self.test_results['left_wheel_forward'] = 'PASS' if result == 'y' else 'FAIL'
 
-        print("  Testing LEFT wheel BACKWARD (slow)...")
-        backward_val = left_limits['center'] - 200
+        print("  Testing LEFT wheel BACKWARD...")
+        backward_val = left_limits.get('reverse_min', 6900)
         self._set_servo(left_ch, backward_val, "left backward")
         time.sleep(1.5)
 
@@ -123,8 +123,8 @@ class HardwareTester:
         time.sleep(0.3)
 
         print("\n--- RIGHT WHEEL ---")
-        print("  Testing RIGHT wheel FORWARD (slow)...")
-        forward_val = right_limits['center'] + 200
+        print("  Testing RIGHT wheel FORWARD...")
+        forward_val = right_limits.get('forward_min', 5000)
         self._set_servo(right_ch, forward_val, "right forward")
         time.sleep(1.5)
 
@@ -134,8 +134,8 @@ class HardwareTester:
         else:
             self.test_results['right_wheel_forward'] = 'PASS' if result == 'y' else 'FAIL'
 
-        print("  Testing RIGHT wheel BACKWARD (slow)...")
-        backward_val = right_limits['center'] - 200
+        print("  Testing RIGHT wheel BACKWARD...")
+        backward_val = right_limits.get('reverse_min', 6900)
         self._set_servo(right_ch, backward_val, "right backward")
         time.sleep(1.5)
 

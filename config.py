@@ -14,9 +14,9 @@ MAESTRO_PORT = '/dev/ttyACM0'  # Adjust based on your setup
 SERVO_CHANNELS = {
     'left_wheel': 0,
     'right_wheel': 1,
-    'head_tilt': 2,
-    'head_pan': 3,
-    'waist': 4,
+    'head_tilt': 3,
+    'head_pan': 4,
+    'waist': 2,
 }
 
 # Servo limits (in Maestro units: typically 4000-8000, center ~6000)
@@ -24,13 +24,21 @@ SERVO_CHANNELS = {
 SERVO_LIMITS = {
     'left_wheel': {
         'min': 4000,
-        'max': 8000,
+        'max': 7500,
         'center': 6000,  # Neutral/stop position for continuous rotation
+        'forward_min': 5000,  # At or below this = forward (lower = faster)
+        'forward_max': 4500,  # Max forward speed
+        'reverse_min': 7000,  # At or above this = reverse (higher = faster)
+        'reverse_max': 7750,  # Max reverse speed (bumped for torque)
     },
     'right_wheel': {
-        'min': 4000,
-        'max': 8000,
+        'min': 4500,
+        'max': 7750,
         'center': 6000,
+        'forward_min': 7000,
+        'forward_max': 7750,
+        'reverse_min': 5000,
+        'reverse_max': 4500,
     },
     'head_tilt': {
         'min': 4500,
@@ -56,8 +64,8 @@ MAX_COMMANDS_PER_SECOND = 20  # Rate limiting
 
 # Voice phrases (customize as desired)
 VOICE_PHRASES = [
-    "Hello, Hunter.",
-    "Hunter is so cool.",
+    "Hello, Jeremiah.",
+    "I need more oil.",
     "Please do not touch my wheels.",
-    "Hunter is the greatest.",
+    "I am very appreciative of Jeremiah Mackey.",
 ]
