@@ -1,20 +1,13 @@
 /**
  * Robot Control Interface
  * Handles communication with Flask server and UI updates.
- *
- * DATA FLOW:
- * 1. User interacts with joystick/sliders/buttons
- * 2. JavaScript validates input locally
- * 3. JSON data sent to Flask API endpoints
- * 4. Flask validates data again (server-side)
- * 5. Valid commands forwarded to robot control layer
- * 6. Response returned to browser
+ * Includes dialog engine text input for Project 2.
  */
 
 // Configuration
 const API_BASE = '';  // Same origin
 const HEARTBEAT_INTERVAL = 200;  // ms
-const DRIVE_UPDATE_INTERVAL = 50;  // ms - how often to send drive commands
+const DRIVE_UPDATE_INTERVAL = 50;  // ms
 
 // State
 let connected = false;
@@ -24,6 +17,7 @@ let heartbeatTimer = null;
 
 // DOM Elements
 const statusEl = document.getElementById('status');
+const engineStateEl = document.getElementById('engine-state');
 const joystickXEl = document.getElementById('joystick-x');
 const joystickYEl = document.getElementById('joystick-y');
 const headTiltEl = document.getElementById('head-tilt');
@@ -34,6 +28,11 @@ const waistEl = document.getElementById('waist');
 const waistValueEl = document.getElementById('waist-value');
 const stopBtn = document.getElementById('stop-btn');
 const lastUpdateEl = document.getElementById('last-update');
+
+// Dialog elements
+const dialogInput = document.getElementById('dialog-input');
+const dialogSendBtn = document.getElementById('dialog-send');
+const dialogLog = document.getElementById('dialog-log');
 
 // ==================== API Functions ====================
 
@@ -61,13 +60,11 @@ async function apiCall(endpoint, data) {
 }
 
 async function sendDriveCommand(x, y) {
-    // Validate locally first
     if (typeof x !== 'number' || typeof y !== 'number') {
         console.error('Invalid drive values');
         return;
     }
 
-    // Clamp values
     x = Math.max(-1, Math.min(1, x));
     y = Math.max(-1, Math.min(1, y));
 
@@ -79,7 +76,6 @@ async function sendDriveCommand(x, y) {
 }
 
 async function sendHeadTilt(position) {
-    // Validate: 0-100 from slider, convert to 0-1
     const normalized = Math.max(0, Math.min(100, position)) / 100;
     return await apiCall('/api/head/tilt', { position: normalized });
 }
@@ -114,6 +110,10 @@ async function sendHeartbeat() {
             setConnectionStatus(true);
             const data = await response.json();
             updateLastUpdate();
+            // Update engine state display
+            if (data.status && engineStateEl) {
+                engineStateEl.textContent = 'State: ' + (data.engine_state || 'N/A');
+            }
             return data;
         } else {
             setConnectionStatus(false);
@@ -124,6 +124,51 @@ async function sendHeartbeat() {
         return null;
     }
 }
+
+// ==================== Dialog Functions ====================
+
+function addDialogMessage(text, className) {
+    const div = document.createElement('div');
+    div.className = className;
+    div.textContent = text;
+    dialogLog.appendChild(div);
+    dialogLog.scrollTop = dialogLog.scrollHeight;
+}
+
+async function sendDialogInput() {
+    const text = dialogInput.value.trim();
+    if (!text) return;
+
+    // Show user message
+    addDialogMessage('You: ' + text, 'user-msg');
+    dialogInput.value = '';
+
+    // Send to server
+    const result = await apiCall('/api/dialog', { text: text });
+
+    if (result.success) {
+        if (result.response) {
+            addDialogMessage('Robot: ' + result.response, 'robot-msg');
+        }
+        if (result.actions && result.actions.length > 0) {
+            addDialogMessage('Actions: ' + result.actions.map(a => '<' + a + '>').join(' '), 'action-msg');
+        }
+        // Update state display
+        if (engineStateEl) {
+            engineStateEl.textContent = 'State: ' + (result.state || 'N/A');
+        }
+    } else {
+        addDialogMessage('Error: ' + (result.error || 'Unknown error'), 'system-msg');
+    }
+}
+
+// Dialog event listeners
+dialogSendBtn.addEventListener('click', sendDialogInput);
+dialogInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        sendDialogInput();
+    }
+});
 
 // ==================== UI Functions ====================
 
@@ -152,25 +197,21 @@ const joystick = new VirtualJoystick('joystick', 'joystick-knob', {
         updateJoystickDisplay(x, y);
         lastDriveCommand = { x, y };
 
-        // Start sending updates if not already
         if (!driveUpdateTimer) {
             driveUpdateTimer = setInterval(() => {
                 sendDriveCommand(lastDriveCommand.x, lastDriveCommand.y);
             }, DRIVE_UPDATE_INTERVAL);
 
-            // Send immediately
             sendDriveCommand(x, y);
         }
     },
 
     onEnd: () => {
-        // Stop the update timer
         if (driveUpdateTimer) {
             clearInterval(driveUpdateTimer);
             driveUpdateTimer = null;
         }
 
-        // Send stop command
         lastDriveCommand = { x: 0, y: 0 };
         updateJoystickDisplay(0, 0);
         sendDriveCommand(0, 0);
@@ -179,21 +220,18 @@ const joystick = new VirtualJoystick('joystick', 'joystick-knob', {
 
 // ==================== Slider Setup ====================
 
-// Head Tilt
 headTiltEl.addEventListener('input', (e) => {
     const value = parseInt(e.target.value);
     headTiltValueEl.textContent = value + '%';
     sendHeadTilt(value);
 });
 
-// Head Pan
 headPanEl.addEventListener('input', (e) => {
     const value = parseInt(e.target.value);
     headPanValueEl.textContent = value + '%';
     sendHeadPan(value);
 });
 
-// Waist
 waistEl.addEventListener('input', (e) => {
     const value = parseInt(e.target.value);
     waistValueEl.textContent = value + '%';
@@ -214,18 +252,18 @@ document.querySelectorAll('.voice-btn').forEach(btn => {
 stopBtn.addEventListener('click', () => {
     sendStop();
 
-    // Also stop any ongoing joystick updates
     if (driveUpdateTimer) {
         clearInterval(driveUpdateTimer);
         driveUpdateTimer = null;
     }
     lastDriveCommand = { x: 0, y: 0 };
     updateJoystickDisplay(0, 0);
+
+    addDialogMessage('EMERGENCY STOP', 'system-msg');
 });
 
 // ==================== Safety: Page Visibility ====================
 
-// Stop robot when page is hidden (tab switch, minimize, etc.)
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
         console.log('Page hidden - stopping robot');
@@ -239,18 +277,18 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // Stop robot before page unload (refresh, close, navigate away)
-window.addEventListener('beforeunload', () => {
-    // Use synchronous request for unload
-    navigator.sendBeacon(API_BASE + '/api/stop', JSON.stringify({}));
-});
+function sendStopBeacon() {
+    const blob = new Blob(['{}'], { type: 'application/json' });
+    navigator.sendBeacon(API_BASE + '/api/stop', blob);
+}
+
+window.addEventListener('beforeunload', sendStopBeacon);
+window.addEventListener('pagehide', sendStopBeacon);
 
 // ==================== Heartbeat ====================
 
 function startHeartbeat() {
-    // Initial heartbeat
     sendHeartbeat();
-
-    // Regular heartbeat
     heartbeatTimer = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL);
 }
 
@@ -262,7 +300,6 @@ function init() {
     startHeartbeat();
 }
 
-// Start when DOM is ready
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
 } else {

@@ -175,11 +175,11 @@ class HardwareTester:
         self._set_servo(tilt_ch, tilt_limits['center'], "tilt center")
         time.sleep(0.5)
 
-        print("  Moving to MIN (look down)...")
+        print("  Moving to MIN (look up)...")
         self._set_servo(tilt_ch, tilt_limits['min'], "tilt min")
         time.sleep(1)
 
-        print("  Moving to MAX (look up)...")
+        print("  Moving to MAX (look down)...")
         self._set_servo(tilt_ch, tilt_limits['max'], "tilt max")
         time.sleep(1)
 
@@ -199,11 +199,11 @@ class HardwareTester:
         self._set_servo(pan_ch, pan_limits['center'], "pan center")
         time.sleep(0.5)
 
-        print("  Moving to MIN (look left)...")
+        print("  Moving to MIN (look right)...")
         self._set_servo(pan_ch, pan_limits['min'], "pan min")
         time.sleep(1)
 
-        print("  Moving to MAX (look right)...")
+        print("  Moving to MAX (look left)...")
         self._set_servo(pan_ch, pan_limits['max'], "pan max")
         time.sleep(1)
 

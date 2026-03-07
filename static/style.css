@@ -281,3 +281,89 @@ footer {
         height: 40px;
     }
 }
+
+/* Engine State */
+.engine-state {
+    font-size: 0.8rem;
+    color: #888;
+    margin-top: 4px;
+    font-family: monospace;
+}
+
+/* Dialog */
+.dialog-container {
+    display: flex;
+    flex-direction: column;
+}
+
+.dialog-log {
+    background: #0d1b2a;
+    border-radius: 8px;
+    padding: 10px;
+    height: 200px;
+    overflow-y: auto;
+    margin-bottom: 10px;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.dialog-log .user-msg {
+    color: #4fc3f7;
+    margin-bottom: 4px;
+}
+
+.dialog-log .robot-msg {
+    color: #81c784;
+    margin-bottom: 4px;
+}
+
+.dialog-log .action-msg {
+    color: #ffc107;
+    font-size: 0.8rem;
+    margin-bottom: 4px;
+}
+
+.dialog-log .system-msg {
+    color: #ff5252;
+    font-size: 0.8rem;
+    margin-bottom: 4px;
+}
+
+.dialog-input-row {
+    display: flex;
+    gap: 8px;
+}
+
+.dialog-input {
+    flex: 1;
+    padding: 10px 12px;
+    background: #0d1b2a;
+    border: 2px solid #2d3a5a;
+    border-radius: 8px;
+    color: #eee;
+    font-size: 1rem;
+    outline: none;
+}
+
+.dialog-input:focus {
+    border-color: #4fc3f7;
+}
+
+.dialog-send-btn {
+    padding: 10px 20px;
+    background-color: #0d47a1;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.dialog-send-btn:hover {
+    background-color: #1565c0;
+}
+
+.dialog-send-btn:active {
+    background-color: #1976d2;
+}

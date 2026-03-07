@@ -40,13 +40,10 @@ class RobotController:
         self.servo = None
         self.lock = threading.Lock()
 
-        # Track current positions
+        # Track current positions for all servos
         self.current_positions = {
-            'left_wheel': SERVO_LIMITS['left_wheel']['center'],
-            'right_wheel': SERVO_LIMITS['right_wheel']['center'],
-            'head_tilt': SERVO_LIMITS['head_tilt']['center'],
-            'head_pan': SERVO_LIMITS['head_pan']['center'],
-            'waist': SERVO_LIMITS['waist']['center'],
+            name: limits['center']
+            for name, limits in SERVO_LIMITS.items()
         }
 
         # Safety: last command timestamp
@@ -111,7 +108,9 @@ class RobotController:
             return False
 
         limits = SERVO_LIMITS[channel_name]
-        clamped_value = self._clamp(int(value), limits['min'], limits['max'])
+        low = min(limits['min'], limits['max'])
+        high = max(limits['min'], limits['max'])
+        clamped_value = self._clamp(int(value), low, high)
 
         if clamped_value != value:
             print(f"WARNING: {channel_name} value {value} clamped to {clamped_value}")
@@ -139,14 +138,9 @@ class RobotController:
         """
         print("STOP ALL - Setting neutral state")
 
-        # Stop wheels (set to center = no rotation)
-        self._set_servo('left_wheel', SERVO_LIMITS['left_wheel']['center'])
-        self._set_servo('right_wheel', SERVO_LIMITS['right_wheel']['center'])
-
-        # Center head and waist
-        self._set_servo('head_tilt', SERVO_LIMITS['head_tilt']['center'])
-        self._set_servo('head_pan', SERVO_LIMITS['head_pan']['center'])
-        self._set_servo('waist', SERVO_LIMITS['waist']['center'])
+        # Center all servos
+        for name, limits in SERVO_LIMITS.items():
+            self._set_servo(name, limits['center'])
 
         return True
 

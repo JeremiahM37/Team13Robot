@@ -11,9 +11,23 @@
         <header>
             <h1>Robot Control</h1>
             <div id="status" class="status disconnected">Connecting...</div>
+            <div id="engine-state" class="engine-state">State: --</div>
         </header>
 
         <main>
+            <!-- Dialog Section -->
+            <section class="control-section">
+                <h2>Dialog</h2>
+                <div class="dialog-container">
+                    <div id="dialog-log" class="dialog-log"></div>
+                    <div class="dialog-input-row">
+                        <input type="text" id="dialog-input" class="dialog-input"
+                               placeholder="Type something to say..." autocomplete="off">
+                        <button id="dialog-send" class="dialog-send-btn">Send</button>
+                    </div>
+                </div>
+            </section>
+
             <!-- Drive Control Section -->
             <section class="control-section">
                 <h2>Drive</h2>
