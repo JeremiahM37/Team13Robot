@@ -30,6 +30,7 @@ from config import (
 from robot_control import RobotController, SafetyWatchdog
 from dialog_engine import DialogEngine
 from action_runner import ActionRunner
+from lidar_safety import LidarSafety
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -41,6 +42,7 @@ robot = None
 watchdog = None
 dialog_engine = None
 action_runner = None
+lidar = None
 
 # Rate limiting
 command_times = []
@@ -104,7 +106,10 @@ def drive():
     if error:
         return jsonify({'success': False, 'error': error}), 400
     success = robot.drive_joystick(x, y)
-    return jsonify({'success': success})
+    result = {'success': success}
+    if lidar:
+        result['lidar'] = lidar.get_status()
+    return jsonify(result)
 
 
 @app.route('/api/head/tilt', methods=['POST'])
@@ -242,7 +247,7 @@ def server_error(e):
 # ==================== MAIN ====================
 
 def main():
-    global robot, watchdog, dialog_engine, action_runner
+    global robot, watchdog, dialog_engine, action_runner, lidar
 
     simulation_mode = '--sim' in sys.argv
 
@@ -264,11 +269,19 @@ def main():
                 print("WARNING: Invalid seed value, using random")
 
     print("=" * 50)
-    print("Robot Control Server - Project 2: Dialog Engine")
+    print("Robot Control Server - Project 3: Lidar Safety Stop")
     print("=" * 50)
 
-    # Initialize robot controller
-    robot = RobotController(simulation_mode=simulation_mode)
+    # Initialize LIDAR safety system
+    if not simulation_mode:
+        lidar = LidarSafety()
+        lidar.start()
+    else:
+        lidar = None
+        print("[LIDAR] Skipped in simulation mode")
+
+    # Initialize robot controller with LIDAR
+    robot = RobotController(simulation_mode=simulation_mode, lidar=lidar)
 
     # Initialize dialog engine
     dialog_engine = DialogEngine(seed=seed)
@@ -303,6 +316,8 @@ def main():
     finally:
         if action_runner:
             action_runner.stop()
+        if lidar:
+            lidar.stop()
         if watchdog:
             watchdog.stop()
         if robot:

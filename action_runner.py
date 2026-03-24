@@ -158,24 +158,31 @@ class ActionRunner:
         self.robot.set_head_pan(0.5)
 
     def _do_arm_raise(self):
-        """Raise right arm using shoulder2 (ch6), hold, return to neutral."""
+        """Raise right arm using shoulder1 (ch5) + shoulder2 (ch6), hold, return."""
         if self._check_interrupt():
             return
 
-        # Shoulder2 (ch6, center 7000) controls the up/down raise
-        limits = SERVO_LIMITS['right_shoulder2']
-        center = limits['center']  # 7000
+        limits1 = SERVO_LIMITS['right_shoulder1']
+        center1 = limits1['center']  # 9000
+        limits2 = SERVO_LIMITS['right_shoulder2']
+        center2 = limits2['center']  # 7000
 
-        # Move toward min (3000) = arm up — 60% of travel
-        raise_target = center + (limits['min'] - center) * 0.6
-        self.robot._set_servo('right_shoulder2', int(raise_target))
+        # Shoulder1 toward max (inward) + shoulder2 toward max (outward)
+        # Combined should lift the arm up
+        raise1 = center1 + (limits1['max'] - center1) * 0.4  # 9000 -> ~9400
+        raise2 = center2 + (limits2['max'] - center2) * 0.4  # 7000 -> ~8200
+
+        self.robot._set_servo('right_shoulder1', int(raise1))
+        self.robot._set_servo('right_shoulder2', int(raise2))
 
         if not self._safe_sleep(1.5):
-            self.robot._set_servo('right_shoulder2', center)
+            self.robot._set_servo('right_shoulder1', center1)
+            self.robot._set_servo('right_shoulder2', center2)
             return
 
         # Return to neutral
-        self.robot._set_servo('right_shoulder2', center)
+        self.robot._set_servo('right_shoulder1', center1)
+        self.robot._set_servo('right_shoulder2', center2)
         self._safe_sleep(0.3)
 
     def _do_dance90(self):

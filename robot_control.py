@@ -27,18 +27,21 @@ class RobotController:
     """
     Main robot control class.
     Provides safe, validated control of all robot actuators.
+    Integrates LIDAR safety to block unsafe forward/backward motion.
     """
 
-    def __init__(self, simulation_mode=False):
+    def __init__(self, simulation_mode=False, lidar=None):
         """
         Initialize the robot controller.
 
         Args:
             simulation_mode: If True, don't connect to real hardware
+            lidar: Optional LidarSafety instance for obstacle detection
         """
         self.simulation_mode = simulation_mode or not MAESTRO_AVAILABLE
         self.servo = None
         self.lock = threading.Lock()
+        self.lidar = lidar
 
         # Track current positions for all servos
         self.current_positions = {
@@ -200,6 +203,15 @@ class RobotController:
 
         x = self._clamp(float(x), -1.0, 1.0)
         y = self._clamp(float(y), -1.0, 1.0)
+
+        # LIDAR safety check: block forward/backward if obstacle detected
+        if self.lidar:
+            if y > 0 and self.lidar.front_blocked:
+                print(f"[SAFETY] Forward BLOCKED by obstacle - ignoring forward (y={y:.2f})")
+                y = 0  # Kill forward component, turning still allowed
+            if y < 0 and self.lidar.rear_blocked:
+                print(f"[SAFETY] Reverse BLOCKED by obstacle - ignoring backward (y={y:.2f})")
+                y = 0  # Kill backward component, turning still allowed
 
         # Convert joystick to differential drive
         # Forward/backward is y, turning is x
