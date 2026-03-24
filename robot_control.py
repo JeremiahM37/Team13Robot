@@ -205,11 +205,13 @@ class RobotController:
         y = self._clamp(float(y), -1.0, 1.0)
 
         # LIDAR safety check: block forward/backward if obstacle detected
+        # Any y component beyond the dead zone counts as forward/backward intent
+        SAFETY_DEADZONE = 0.05
         if self.lidar:
-            if y > 0 and self.lidar.front_blocked:
+            if y > SAFETY_DEADZONE and self.lidar.front_blocked:
                 print(f"[SAFETY] Forward BLOCKED by obstacle - ignoring forward (y={y:.2f})")
                 y = 0  # Kill forward component, turning still allowed
-            if y < 0 and self.lidar.rear_blocked:
+            if y < -SAFETY_DEADZONE and self.lidar.rear_blocked:
                 print(f"[SAFETY] Reverse BLOCKED by obstacle - ignoring backward (y={y:.2f})")
                 y = 0  # Kill backward component, turning still allowed
 

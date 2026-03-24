@@ -72,7 +72,24 @@ async function sendDriveCommand(x, y) {
     if (result.success) {
         setConnectionStatus(true);
     }
+    // Update LIDAR status display
+    if (result.lidar) {
+        updateLidarStatus(result.lidar);
+    }
     return result;
+}
+
+function updateLidarStatus(lidar) {
+    const el = document.getElementById('lidar-status');
+    if (!el) return;
+    const frontStr = lidar.front_blocked ? 'BLOCKED' : 'clear';
+    const rearStr = lidar.rear_blocked ? 'BLOCKED' : 'clear';
+    const frontDist = lidar.front_min_distance_mm >= 0 ? lidar.front_min_distance_mm + 'mm' : '--';
+    const rearDist = lidar.rear_min_distance_mm >= 0 ? lidar.rear_min_distance_mm + 'mm' : '--';
+    el.textContent = `Front: ${frontStr} (${frontDist}) | Rear: ${rearStr} (${rearDist})`;
+    el.className = 'lidar-status' +
+        (lidar.front_blocked ? ' front-blocked' : '') +
+        (lidar.rear_blocked ? ' rear-blocked' : '');
 }
 
 async function sendHeadTilt(position) {
@@ -245,6 +262,68 @@ document.querySelectorAll('.voice-btn').forEach(btn => {
         const index = parseInt(btn.dataset.phraseIndex);
         sendSpeak(index);
     });
+});
+
+// ==================== WASD / Arrow Key Controls ====================
+
+const keysPressed = {};
+let keyDriveTimer = null;
+
+function isTypingInInput() {
+    const active = document.activeElement;
+    return active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+}
+
+function updateKeyDrive() {
+    let x = 0, y = 0;
+    if (keysPressed['w'] || keysPressed['arrowup']) y += 1;
+    if (keysPressed['s'] || keysPressed['arrowdown']) y -= 1;
+    if (keysPressed['a'] || keysPressed['arrowleft']) x -= 1;
+    if (keysPressed['d'] || keysPressed['arrowright']) x += 1;
+
+    updateJoystickDisplay(x, y);
+    sendDriveCommand(x, y);
+}
+
+document.addEventListener('keydown', (e) => {
+    if (isTypingInInput()) return;
+
+    const key = e.key.toLowerCase();
+    if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(key)) {
+        e.preventDefault();
+        if (keysPressed[key]) return; // Already held
+        keysPressed[key] = true;
+
+        // Send immediately and start repeating
+        updateKeyDrive();
+        if (!keyDriveTimer) {
+            keyDriveTimer = setInterval(updateKeyDrive, DRIVE_UPDATE_INTERVAL);
+        }
+    }
+    // Spacebar = emergency stop
+    if (key === ' ') {
+        e.preventDefault();
+        sendStop();
+    }
+});
+
+document.addEventListener('keyup', (e) => {
+    const key = e.key.toLowerCase();
+    delete keysPressed[key];
+
+    // If no drive keys held, stop and clear timer
+    const driveKeys = ['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'];
+    const anyHeld = driveKeys.some(k => keysPressed[k]);
+    if (!anyHeld) {
+        if (keyDriveTimer) {
+            clearInterval(keyDriveTimer);
+            keyDriveTimer = null;
+        }
+        updateJoystickDisplay(0, 0);
+        sendDriveCommand(0, 0);
+    } else {
+        updateKeyDrive();
+    }
 });
 
 // ==================== Stop Button ====================

@@ -4,11 +4,32 @@ Lidar Safety Module
 Continuously scans using the RPLIDAR and sets front/rear blocked flags.
 Runs in a background thread so it doesn't block the Flask server.
 
-Lidar Zones:
-  - Front danger zone: 330-360 and 0-30 degrees (60 degree cone in front)
-  - Rear danger zone: 150-210 degrees (60 degree cone behind)
+LIDAR Orientation:
+  - 0 degrees = directly in front of the robot
+  - 90 degrees = left side of the robot
+  - 180 degrees = directly behind the robot
+  - 270 degrees = right side of the robot
 
-Stopping distance: 800mm (configurable)
+Detection Zones (60-degree cones):
+  - Front danger zone: 330-360 and 0-30 degrees
+    This is a 60-degree cone centered on 0 (straight ahead).
+    Only blocks forward motion (positive Y joystick).
+    Turning in place and sideways motion are NOT blocked.
+
+  - Rear danger zone: 150-210 degrees
+    This is a 60-degree cone centered on 180 (straight behind).
+    Only blocks backward motion (negative Y joystick).
+    Turning in place and sideways motion are NOT blocked.
+
+Stopping distance: 800mm
+  Any LIDAR reading within the danger zone closer than 800mm
+  will set the corresponding blocked flag.
+
+Safety behavior:
+  - Forward blocked: joystick Y is zeroed, X (turning) still works
+  - Rear blocked: joystick Y is zeroed, X (turning) still works
+  - Both blocked: only turning in place is allowed
+  - Obstacles that enter/leave range are detected dynamically
 
 Thread safety: front_blocked and rear_blocked are simple booleans,
 which are atomic in CPython. A lock is used for the scan data.
@@ -21,8 +42,12 @@ from rplidar import RPLidar
 # Configuration - tune these for your robot
 LIDAR_PORT = '/dev/ttyUSB0'
 STOP_DISTANCE_MM = 800         # Stop if obstacle closer than this
-FRONT_ZONE = (330, 30)         # Front zone: 330-360 and 0-30
-REAR_ZONE = (150, 210)         # Rear zone: 150-210
+
+# Front zone: 30 degrees each side of 0 = 330 to 30 (60 degree cone)
+FRONT_ZONE = (330, 30)
+
+# Rear zone: 30 degrees each side of 180 = 150 to 210 (60 degree cone)
+REAR_ZONE = (150, 210)
 
 
 def angle_in_zone(angle, zone_start, zone_end):
@@ -61,8 +86,8 @@ class LidarSafety:
         self._thread = threading.Thread(target=self._scan_loop, daemon=True)
         self._thread.start()
         print(f"[LIDAR] Started scanning (stop distance: {self.stop_distance}mm)")
-        print(f"[LIDAR] Front zone: {FRONT_ZONE[0]}-360 and 0-{FRONT_ZONE[1]} degrees")
-        print(f"[LIDAR] Rear zone: {REAR_ZONE[0]}-{REAR_ZONE[1]} degrees")
+        print(f"[LIDAR] Front zone: {FRONT_ZONE[0]}-360 and 0-{FRONT_ZONE[1]} degrees (60 deg cone)")
+        print(f"[LIDAR] Rear zone: {REAR_ZONE[0]}-{REAR_ZONE[1]} degrees (60 deg cone)")
 
     def stop(self):
         """Stop the LIDAR scanning thread."""

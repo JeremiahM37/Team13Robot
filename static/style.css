@@ -367,3 +367,36 @@ footer {
 .dialog-send-btn:active {
     background-color: #1976d2;
 }
+
+/* LIDAR status */
+.lidar-status {
+    text-align: center;
+    padding: 8px;
+    margin-bottom: 10px;
+    border-radius: 6px;
+    font-weight: bold;
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+
+.lidar-status.front-blocked {
+    background: #ffebee;
+    color: #c62828;
+}
+
+.lidar-status.rear-blocked {
+    background: #fff3e0;
+    color: #e65100;
+}
+
+.lidar-status.front-blocked.rear-blocked {
+    background: #ffcdd2;
+    color: #b71c1c;
+}
+
+.keyboard-hint {
+    text-align: center;
+    font-size: 0.8em;
+    color: #888;
+    margin-top: 8px;
+}
