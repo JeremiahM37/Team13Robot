@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Robot Control</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Robot Control</h1>
+            <div id="status" class="status disconnected">Connecting...</div>
+            <div id="engine-state" class="engine-state">State: --</div>
+        </header>
+
+        <main>
+            <!-- Dialog Section -->
+            <section class="control-section">
+                <h2>Dialog</h2>
+                <div class="dialog-container">
+                    <div id="dialog-log" class="dialog-log"></div>
+                    <div class="dialog-input-row">
+                        <input type="text" id="dialog-input" class="dialog-input"
+                               placeholder="Type something to say..." autocomplete="off">
+                        <button id="dialog-send" class="dialog-send-btn">Send</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Drive Control Section -->
+            <section class="control-section">
+                <h2>Drive</h2>
+                <div id="lidar-status" class="lidar-status">LIDAR: waiting...</div>
+                <div class="joystick-container">
+                    <div id="joystick" class="joystick">
+                        <div id="joystick-knob" class="joystick-knob"></div>
+                    </div>
+                    <div class="joystick-info">
+                        <span>X: <span id="joystick-x">0.00</span></span>
+                        <span>Y: <span id="joystick-y">0.00</span></span>
+                    </div>
+                </div>
+                <div class="keyboard-hint">WASD / Arrow keys to drive, Space = stop</div>
+            </section>
+
+            <!-- Head Control Section -->
+            <section class="control-section">
+                <h2>Head</h2>
+                <div class="slider-group">
+                    <label for="head-tilt">Tilt (Up/Down)</label>
+                    <input type="range" id="head-tilt" min="0" max="100" value="50">
+                    <span id="head-tilt-value">50%</span>
+                </div>
+                <div class="slider-group">
+                    <label for="head-pan">Pan (Left/Right)</label>
+                    <input type="range" id="head-pan" min="0" max="100" value="50">
+                    <span id="head-pan-value">50%</span>
+                </div>
+            </section>
+
+            <!-- Waist Control Section -->
+            <section class="control-section">
+                <h2>Waist</h2>
+                <div class="slider-group">
+                    <label for="waist">Rotation</label>
+                    <input type="range" id="waist" min="0" max="100" value="50">
+                    <span id="waist-value">50%</span>
+                </div>
+            </section>
+
+            <!-- Voice Control Section -->
+            <section class="control-section">
+                <h2>Voice</h2>
+                <div class="voice-buttons">
+                    {% for phrase in phrases %}
+                    <button class="voice-btn" data-phrase-index="{{ loop.index0 }}">
+                        {{ phrase }}
+                    </button>
+                    {% endfor %}
+                </div>
+            </section>
+
+            <!-- Autonomous Modes -->
+            <section class="control-section">
+                <h2>Autonomous Modes</h2>
+                <div id="auto-status" class="auto-status">Idle</div>
+                <div class="auto-buttons">
+                    <button id="wall-follow-right-btn" class="auto-btn">Wall Follow (Right)</button>
+                    <button id="wall-follow-left-btn" class="auto-btn">Wall Follow (Left)</button>
+                    <button id="greeter-voice-btn" class="auto-btn greeter-btn">Greeter (Voice)</button>
+                    <button id="greeter-keyboard-btn" class="auto-btn greeter-btn">Greeter (Keyboard)</button>
+                    <button id="auto-stop-btn" class="auto-btn auto-stop-btn">Stop Autonomous</button>
+                </div>
+            </section>
+
+            <!-- Emergency Stop -->
+            <section class="control-section">
+                <button id="stop-btn" class="stop-btn">STOP</button>
+            </section>
+        </main>
+
+        <footer>
+            <small>Last update: <span id="last-update">--</span></small>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='joystick.js') }}"></script>
+    <script src="{{ url_for('static', filename='control.js') }}"></script>
+</body>
+</html>

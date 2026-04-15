@@ -1,0 +1,456 @@
+/* Robot Control Interface Styles */
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+    background-color: #1a1a2e;
+    color: #eee;
+    min-height: 100vh;
+    touch-action: manipulation;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+.container {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 10px;
+}
+
+header {
+    text-align: center;
+    padding: 15px 0;
+    border-bottom: 1px solid #333;
+    margin-bottom: 15px;
+}
+
+header h1 {
+    font-size: 1.5rem;
+    margin-bottom: 8px;
+}
+
+.status {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.status.connected {
+    background-color: #00c853;
+    color: #000;
+}
+
+.status.disconnected {
+    background-color: #ff5252;
+    color: #fff;
+}
+
+.status.warning {
+    background-color: #ffc107;
+    color: #000;
+}
+
+/* Control Sections */
+.control-section {
+    background-color: #16213e;
+    border-radius: 12px;
+    padding: 15px;
+    margin-bottom: 15px;
+}
+
+.control-section h2 {
+    font-size: 1.1rem;
+    margin-bottom: 12px;
+    color: #4fc3f7;
+}
+
+/* Joystick */
+.joystick-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.joystick {
+    width: 180px;
+    height: 180px;
+    background: radial-gradient(circle, #2d3a5a 0%, #1a2744 100%);
+    border-radius: 50%;
+    border: 3px solid #4fc3f7;
+    position: relative;
+    touch-action: none;
+}
+
+.joystick-knob {
+    width: 60px;
+    height: 60px;
+    background: radial-gradient(circle, #4fc3f7 0%, #0288d1 100%);
+    border-radius: 50%;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    cursor: grab;
+    box-shadow: 0 4px 15px rgba(79, 195, 247, 0.4);
+    transition: box-shadow 0.2s;
+}
+
+.joystick-knob:active {
+    cursor: grabbing;
+    box-shadow: 0 6px 20px rgba(79, 195, 247, 0.6);
+}
+
+.joystick-info {
+    margin-top: 10px;
+    display: flex;
+    gap: 20px;
+    font-family: monospace;
+    font-size: 0.9rem;
+    color: #888;
+}
+
+/* Sliders */
+.slider-group {
+    margin-bottom: 15px;
+}
+
+.slider-group:last-child {
+    margin-bottom: 0;
+}
+
+.slider-group label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 0.9rem;
+    color: #aaa;
+}
+
+.slider-group input[type="range"] {
+    width: calc(100% - 50px);
+    height: 8px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: #2d3a5a;
+    border-radius: 4px;
+    outline: none;
+    vertical-align: middle;
+}
+
+.slider-group input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 24px;
+    height: 24px;
+    background: #4fc3f7;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(79, 195, 247, 0.4);
+}
+
+.slider-group input[type="range"]::-moz-range-thumb {
+    width: 24px;
+    height: 24px;
+    background: #4fc3f7;
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 2px 8px rgba(79, 195, 247, 0.4);
+}
+
+.slider-group span {
+    display: inline-block;
+    width: 45px;
+    text-align: right;
+    font-family: monospace;
+    color: #888;
+    vertical-align: middle;
+    margin-left: 5px;
+}
+
+/* Voice Buttons */
+.voice-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.voice-btn {
+    padding: 12px 10px;
+    background-color: #0d47a1;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background-color 0.2s, transform 0.1s;
+}
+
+.voice-btn:hover {
+    background-color: #1565c0;
+}
+
+.voice-btn:active {
+    background-color: #1976d2;
+    transform: scale(0.98);
+}
+
+/* Stop Button */
+.stop-btn {
+    width: 100%;
+    padding: 20px;
+    background-color: #c62828;
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    font-size: 1.5rem;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background-color 0.2s, transform 0.1s;
+    box-shadow: 0 4px 15px rgba(198, 40, 40, 0.4);
+}
+
+.stop-btn:hover {
+    background-color: #d32f2f;
+}
+
+.stop-btn:active {
+    background-color: #e53935;
+    transform: scale(0.98);
+}
+
+/* Footer */
+footer {
+    text-align: center;
+    padding: 15px 0;
+    color: #666;
+}
+
+/* Responsive adjustments */
+@media (max-width: 400px) {
+    .joystick {
+        width: 150px;
+        height: 150px;
+    }
+
+    .joystick-knob {
+        width: 50px;
+        height: 50px;
+    }
+
+    .voice-buttons {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Landscape mode adjustments */
+@media (max-height: 500px) and (orientation: landscape) {
+    .container {
+        display: flex;
+        flex-wrap: wrap;
+        max-width: 100%;
+        gap: 10px;
+    }
+
+    header {
+        width: 100%;
+        padding: 5px 0;
+        margin-bottom: 5px;
+    }
+
+    .control-section {
+        flex: 1;
+        min-width: 200px;
+        margin-bottom: 5px;
+        padding: 10px;
+    }
+
+    .joystick {
+        width: 120px;
+        height: 120px;
+    }
+
+    .joystick-knob {
+        width: 40px;
+        height: 40px;
+    }
+}
+
+/* Engine State */
+.engine-state {
+    font-size: 0.8rem;
+    color: #888;
+    margin-top: 4px;
+    font-family: monospace;
+}
+
+/* Dialog */
+.dialog-container {
+    display: flex;
+    flex-direction: column;
+}
+
+.dialog-log {
+    background: #0d1b2a;
+    border-radius: 8px;
+    padding: 10px;
+    height: 200px;
+    overflow-y: auto;
+    margin-bottom: 10px;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.dialog-log .user-msg {
+    color: #4fc3f7;
+    margin-bottom: 4px;
+}
+
+.dialog-log .robot-msg {
+    color: #81c784;
+    margin-bottom: 4px;
+}
+
+.dialog-log .action-msg {
+    color: #ffc107;
+    font-size: 0.8rem;
+    margin-bottom: 4px;
+}
+
+.dialog-log .system-msg {
+    color: #ff5252;
+    font-size: 0.8rem;
+    margin-bottom: 4px;
+}
+
+.dialog-input-row {
+    display: flex;
+    gap: 8px;
+}
+
+.dialog-input {
+    flex: 1;
+    padding: 10px 12px;
+    background: #0d1b2a;
+    border: 2px solid #2d3a5a;
+    border-radius: 8px;
+    color: #eee;
+    font-size: 1rem;
+    outline: none;
+}
+
+.dialog-input:focus {
+    border-color: #4fc3f7;
+}
+
+.dialog-send-btn {
+    padding: 10px 20px;
+    background-color: #0d47a1;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.dialog-send-btn:hover {
+    background-color: #1565c0;
+}
+
+.dialog-send-btn:active {
+    background-color: #1976d2;
+}
+
+/* LIDAR status */
+.lidar-status {
+    text-align: center;
+    padding: 8px;
+    margin-bottom: 10px;
+    border-radius: 6px;
+    font-weight: bold;
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+
+.lidar-status.front-blocked {
+    background: #ffebee;
+    color: #c62828;
+}
+
+.lidar-status.rear-blocked {
+    background: #fff3e0;
+    color: #e65100;
+}
+
+.lidar-status.front-blocked.rear-blocked {
+    background: #ffcdd2;
+    color: #b71c1c;
+}
+
+.keyboard-hint {
+    text-align: center;
+    font-size: 0.8em;
+    color: #888;
+    margin-top: 8px;
+}
+
+/* Autonomous mode controls */
+.auto-status {
+    text-align: center;
+    padding: 8px;
+    margin-bottom: 10px;
+    border-radius: 6px;
+    font-weight: bold;
+    background: #f5f5f5;
+    color: #666;
+}
+
+.auto-status.auto-active {
+    background: #e3f2fd;
+    color: #1565c0;
+}
+
+.auto-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+}
+
+.auto-btn {
+    padding: 10px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.9em;
+    font-weight: bold;
+    cursor: pointer;
+    background: #42a5f5;
+    color: white;
+}
+
+.auto-btn:active {
+    background: #1e88e5;
+}
+
+.auto-btn.greeter-btn {
+    background: #66bb6a;
+}
+
+.auto-btn.greeter-btn:active {
+    background: #43a047;
+}
+
+.auto-btn.auto-stop-btn {
+    background: #ef5350;
+}
+
+.auto-btn.auto-stop-btn:active {
+    background: #c62828;
+}
