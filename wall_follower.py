@@ -53,6 +53,7 @@ import signal
 import time
 import threading
 from rplidar import RPLidar
+from collections import deque
 from robot_control import RobotController
 
 # ==================== CONFIGURATION ====================
@@ -69,8 +70,11 @@ FRONT_STOP_MM = 400        # Stop if obstacle closer than this in front
 # Speed settings (0.0 to 1.0)
 FORWARD_SPEED = 0.35       # Base forward speed
 TURN_SPEED = 0.4           # Turn-in-place speed when front is blocked
-STEER_CORRECTION = 0.15    # How much to adjust steering for wall corrections
+MAX_STEER_CORRECTION = 0.25  # Maximum steering correction (proportional)
 SEARCH_TURN_SPEED = 0.2    # Gentle turn speed when searching for lost wall
+
+# Smoothing: median of last N scans per zone (rejects outliers)
+SCAN_HISTORY = 3
 
 # LIDAR zones (degrees) - right wall following
 ZONES_RIGHT = {
@@ -113,20 +117,25 @@ class WallFollower:
     app.py (receiving scan data from a shared LIDAR instance).
     """
 
-    def __init__(self, robot, side='right', speed=FORWARD_SPEED):
+    def __init__(self, robot, side='auto', speed=FORWARD_SPEED):
         """
         Args:
             robot: RobotController instance (shared with app.py)
-            side: 'right' or 'left' - which side the wall is on
+            side: 'right', 'left', or 'auto' (detect closest wall)
             speed: base forward speed (0.0 to 1.0)
         """
         self.robot = robot
         self.side = side
-        self.zones = ZONES_RIGHT if side == 'right' else ZONES_LEFT
+        self._auto_detect = (side == 'auto')
+        self._side_detected = False
+        # Default to right zones until auto-detect picks a side
+        self.zones = ZONES_RIGHT if side != 'left' else ZONES_LEFT
         self.forward_speed = speed
 
         self._lock = threading.Lock()
         self.distances = {name: float('inf') for name in self.zones}
+        # Rolling history of last SCAN_HISTORY readings per zone (for smoothing)
+        self._history = {name: deque(maxlen=SCAN_HISTORY) for name in self.zones}
         self.state = 'IDLE'
         self._running = False
         self._thread = None
@@ -159,6 +168,32 @@ class WallFollower:
         Receive a LIDAR scan from an external source (shared LIDAR).
         Called by the LIDAR thread in app.py or by our own LIDAR thread.
         """
+        # If auto-detecting, scan both sides to find the closer wall
+        if self._auto_detect and not self._side_detected:
+            left_min = float('inf')
+            right_min = float('inf')
+            for quality, angle, distance in scan:
+                if quality == 0 or distance == 0:
+                    continue
+                # Check left zone (70-110)
+                if angle_in_zone(angle, 70, 110):
+                    left_min = min(left_min, distance)
+                # Check right zone (250-290)
+                if angle_in_zone(angle, 250, 290):
+                    right_min = min(right_min, distance)
+
+            # Pick the closer side once we have valid readings
+            if left_min != float('inf') or right_min != float('inf'):
+                if left_min < right_min:
+                    self.side = 'left'
+                    self.zones = ZONES_LEFT
+                else:
+                    self.side = 'right'
+                    self.zones = ZONES_RIGHT
+                self._side_detected = True
+                print(f"[WALL] Auto-detected: following {self.side.upper()} wall "
+                      f"(L:{safe_round(left_min)}mm R:{safe_round(right_min)}mm)")
+
         zone_mins = {name: float('inf') for name in self.zones}
         for quality, angle, distance in scan:
             if quality == 0 or distance == 0:
@@ -166,8 +201,19 @@ class WallFollower:
             for zone_name, (start, end) in self.zones.items():
                 if angle_in_zone(angle, start, end):
                     zone_mins[zone_name] = min(zone_mins[zone_name], distance)
+
+        # Smoothing: store this scan, return median across last N scans
         with self._lock:
-            self.distances = zone_mins
+            for name, val in zone_mins.items():
+                # Only store valid readings to avoid pulling everything to inf
+                if val != float('inf'):
+                    self._history[name].append(val)
+                # Use median of history (rejects outliers); fall back to inf if empty
+                if self._history[name]:
+                    sorted_vals = sorted(self._history[name])
+                    self.distances[name] = sorted_vals[len(sorted_vals) // 2]
+                else:
+                    self.distances[name] = float('inf')
 
     def get_status(self):
         """Get current wall follower status."""
@@ -217,25 +263,52 @@ class WallFollower:
                     left_speed = self.forward_speed - SEARCH_TURN_SPEED
                     right_speed = self.forward_speed
 
-            # Case 2: Wall too close - steer away
-            elif wall < WALL_TOO_CLOSE_MM:
-                self.state = 'TOO_CLOSE'
-                if self.side == 'right':
-                    left_speed = self.forward_speed - STEER_CORRECTION
-                    right_speed = self.forward_speed + STEER_CORRECTION
+            # Case 2 & 3: Wall too close or too far - PROPORTIONAL steering.
+            # Correction scales with how far outside the dead band we are.
+            # Inside dead band [WALL_TOO_CLOSE, WALL_TOO_FAR] -> no correction.
+            elif wall < WALL_TOO_CLOSE_MM or wall > WALL_TOO_FAR_MM:
+                # Compute error: positive = too far, negative = too close
+                if wall < WALL_TOO_CLOSE_MM:
+                    self.state = 'TOO_CLOSE'
+                    error = wall - WALL_TOO_CLOSE_MM   # negative
+                    # Reference scale: distance from threshold to "lost"/closer bound
+                    ref = WALL_TOO_CLOSE_MM
                 else:
-                    left_speed = self.forward_speed + STEER_CORRECTION
-                    right_speed = self.forward_speed - STEER_CORRECTION
+                    self.state = 'TOO_FAR'
+                    error = wall - WALL_TOO_FAR_MM     # positive
+                    ref = WALL_LOST_MM - WALL_TOO_FAR_MM
 
-            # Case 3: Wall too far - steer toward
-            elif wall > WALL_TOO_FAR_MM:
-                self.state = 'TOO_FAR'
-                if self.side == 'right':
-                    left_speed = self.forward_speed + STEER_CORRECTION
-                    right_speed = self.forward_speed - STEER_CORRECTION
+                # Normalize error to roughly [-1, 1] then scale by max correction.
+                # abs(error)/ref grows as we get further from dead band.
+                magnitude = min(1.0, abs(error) / max(1, ref))
+                correction = magnitude * MAX_STEER_CORRECTION
+
+                # Direction: positive correction means "steer toward wall", negative "steer away"
+                if error > 0:
+                    # Too far: steer toward the wall
+                    steer_toward = True
                 else:
-                    left_speed = self.forward_speed - STEER_CORRECTION
-                    right_speed = self.forward_speed + STEER_CORRECTION
+                    # Too close: steer away from wall
+                    steer_toward = False
+
+                if self.side == 'right':
+                    if steer_toward:
+                        # Toward right wall: speed up left, slow down right
+                        left_speed = self.forward_speed + correction
+                        right_speed = self.forward_speed - correction
+                    else:
+                        # Away from right wall: slow down left, speed up right
+                        left_speed = self.forward_speed - correction
+                        right_speed = self.forward_speed + correction
+                else:
+                    if steer_toward:
+                        # Toward left wall
+                        left_speed = self.forward_speed - correction
+                        right_speed = self.forward_speed + correction
+                    else:
+                        # Away from left wall
+                        left_speed = self.forward_speed + correction
+                        right_speed = self.forward_speed - correction
 
             # Default: in dead band, drive straight
             else:
@@ -258,7 +331,12 @@ class WallFollower:
 
 def main():
     """Run wall follower as a standalone script with its own LIDAR."""
-    side = 'left' if '--left' in sys.argv else 'right'
+    if '--left' in sys.argv:
+        side = 'left'
+    elif '--auto' in sys.argv:
+        side = 'auto'
+    else:
+        side = 'right'
     simulation_mode = '--sim' in sys.argv
 
     speed = FORWARD_SPEED

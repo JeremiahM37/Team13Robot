@@ -291,6 +291,7 @@ async function stopAutonomous() {
     autoStatusEl.className = 'auto-status';
 }
 
+document.getElementById('wall-follow-auto-btn').addEventListener('click', () => startWallFollow('auto'));
 document.getElementById('wall-follow-right-btn').addEventListener('click', () => startWallFollow('right'));
 document.getElementById('wall-follow-left-btn').addEventListener('click', () => startWallFollow('left'));
 document.getElementById('greeter-voice-btn').addEventListener('click', () => startGreeter(false));

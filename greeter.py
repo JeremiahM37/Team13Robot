@@ -41,6 +41,7 @@ import signal
 import time
 import threading
 import subprocess
+from collections import deque
 from rplidar import RPLidar
 from robot_control import RobotController
 
@@ -55,21 +56,26 @@ HUMAN_DETECT_MM = 1000
 WALL_TARGET_MM = 500
 WALL_TOO_CLOSE_MM = 350
 WALL_TOO_FAR_MM = 650
+WALL_LOST_MM = 1500
 FRONT_STOP_MM = 400
 
 # T-intersection detection
 T_FRONT_WALL_MM = 500
 T_SIDE_OPEN_MM = 1200
+T_CONFIRM_SCANS = 3        # Require 3 consecutive scans to confirm T-intersection
 
 # Speed settings
 FORWARD_SPEED = 0.35
 TURN_SPEED = 0.4
-STEER_CORRECTION = 0.15
+MAX_STEER_CORRECTION = 0.25  # Maximum steering correction (proportional)
 TURN_180_DURATION = 3.0    # Tune this on real robot!
 TURN_90_DURATION = 1.5     # Tune this on real robot!
 FINAL_DRIVE_DURATION = 5.0
 
 LOOP_INTERVAL = 0.1
+
+# Smoothing: median of last N scans per zone (rejects outliers)
+SCAN_HISTORY = 3
 
 # LIDAR zones
 ZONES = {
@@ -198,6 +204,10 @@ class RobotGreeter:
 
         self._lock = threading.Lock()
         self.distances = {name: float('inf') for name in ZONES}
+        # Rolling history of last SCAN_HISTORY readings per zone (smoothing)
+        self._history = {name: deque(maxlen=SCAN_HISTORY) for name in ZONES}
+        # Counter for T-intersection confirmation (require N consecutive scans)
+        self._t_confirm_count = 0
         self._running = False
         self._thread = None
 
@@ -227,7 +237,7 @@ class RobotGreeter:
         print("[GREETER] Stopped")
 
     def update_scan(self, scan):
-        """Receive a LIDAR scan from an external source."""
+        """Receive a LIDAR scan from an external source. Applies median smoothing."""
         zone_mins = {name: float('inf') for name in ZONES}
         for quality, angle, distance in scan:
             if quality == 0 or distance == 0:
@@ -235,8 +245,17 @@ class RobotGreeter:
             for zone_name, (start, end) in ZONES.items():
                 if angle_in_zone(angle, start, end):
                     zone_mins[zone_name] = min(zone_mins[zone_name], distance)
+
+        # Smoothing: store this scan, expose median across last N scans
         with self._lock:
-            self.distances = zone_mins
+            for name, val in zone_mins.items():
+                if val != float('inf'):
+                    self._history[name].append(val)
+                if self._history[name]:
+                    sorted_vals = sorted(self._history[name])
+                    self.distances[name] = sorted_vals[len(sorted_vals) // 2]
+                else:
+                    self.distances[name] = float('inf')
 
     def get_status(self):
         """Get current greeter status."""
@@ -339,7 +358,11 @@ class RobotGreeter:
             self.robot.drive(FORWARD_SPEED * 0.5, FORWARD_SPEED * 0.5)
 
     def _handle_moving_to_t(self, dist):
-        """MOVING_TO_T: Wall-follow, detect T-intersection."""
+        """
+        MOVING_TO_T: Wall-follow centered, detect T-intersection.
+        T-intersection requires T_CONFIRM_SCANS consecutive scans showing the
+        T pattern (wall in front + side opening) to avoid false positives.
+        """
         front = dist['front']
         left = dist['left']
         right = dist['right']
@@ -347,29 +370,49 @@ class RobotGreeter:
         # Obstacle avoidance
         if front < FRONT_STOP_MM:
             self.robot.stop_wheels()
-            # Check for T-intersection
+            # T-intersection check (with confirmation counter)
             if front < T_FRONT_WALL_MM and (left > T_SIDE_OPEN_MM or right > T_SIDE_OPEN_MM):
-                print(f"\n[GREETER] T-intersection! F:{safe_round(front)} L:{safe_round(left)} R:{safe_round(right)}")
-                self._set_state(self.TURNING_TO_DEST)
+                self._t_confirm_count += 1
+                print(f"\n[GREETER] T-intersection candidate {self._t_confirm_count}/{T_CONFIRM_SCANS} "
+                      f"F:{safe_round(front)} L:{safe_round(left)} R:{safe_round(right)}")
+                if self._t_confirm_count >= T_CONFIRM_SCANS:
+                    print(f"\n[GREETER] T-intersection CONFIRMED!")
+                    self._t_confirm_count = 0
+                    self._set_state(self.TURNING_TO_DEST)
+            else:
+                self._t_confirm_count = 0   # Reset if pattern lost
             return
 
-        # Wall following - stay centered
-        left_speed = FORWARD_SPEED
-        right_speed = FORWARD_SPEED
+        # Not blocked, reset T counter
+        self._t_confirm_count = 0
 
-        if left < WALL_TOO_CLOSE_MM:
-            left_speed += STEER_CORRECTION
-            right_speed -= STEER_CORRECTION
-        elif left > WALL_TOO_FAR_MM and left < WALL_TOO_FAR_MM * 2:
-            left_speed -= STEER_CORRECTION
-            right_speed += STEER_CORRECTION
+        # PROPORTIONAL wall-following: correction scales with deviation from center.
+        # Compute steering bias from each side independently then combine.
+        def proportional_bias(side_dist):
+            """Returns positive = need to steer toward this side, negative = away."""
+            if side_dist > WALL_TOO_FAR_MM * 2:
+                return 0   # Wall too far to use as reference
+            if side_dist < WALL_TOO_CLOSE_MM:
+                # Too close: steer away (negative)
+                err = WALL_TOO_CLOSE_MM - side_dist
+                magnitude = min(1.0, err / WALL_TOO_CLOSE_MM)
+                return -magnitude * MAX_STEER_CORRECTION
+            elif side_dist > WALL_TOO_FAR_MM:
+                # Too far: steer toward (positive)
+                err = side_dist - WALL_TOO_FAR_MM
+                magnitude = min(1.0, err / (WALL_LOST_MM - WALL_TOO_FAR_MM))
+                return magnitude * MAX_STEER_CORRECTION
+            return 0   # In dead band
 
-        if right < WALL_TOO_CLOSE_MM:
-            left_speed -= STEER_CORRECTION
-            right_speed += STEER_CORRECTION
-        elif right > WALL_TOO_FAR_MM and right < WALL_TOO_FAR_MM * 2:
-            left_speed += STEER_CORRECTION
-            right_speed -= STEER_CORRECTION
+        left_bias = proportional_bias(left)    # + means steer toward left
+        right_bias = proportional_bias(right)  # + means steer toward right
+
+        # Net steering: positive turns left (toward left wall), negative turns right
+        # toward_left from left_bias, away_from_right (toward left) from -right_bias
+        steer = left_bias - right_bias
+
+        left_speed = FORWARD_SPEED - steer
+        right_speed = FORWARD_SPEED + steer
 
         self.robot.drive(left_speed, right_speed)
 
