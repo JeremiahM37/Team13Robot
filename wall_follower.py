@@ -61,34 +61,37 @@ from robot_control import RobotController
 LIDAR_PORT = '/dev/ttyUSB0'
 
 # Wall following parameters (mm)
-WALL_TARGET_MM = 500       # Ideal distance from wall
-WALL_TOO_CLOSE_MM = 350    # Steer away below this
-WALL_TOO_FAR_MM = 650      # Steer toward above this
+WALL_TARGET_MM = 600       # Ideal distance from wall (~60cm, good for 2m hallway)
+WALL_TOO_CLOSE_MM = 450    # Steer away below this
+WALL_TOO_FAR_MM = 750      # Steer toward above this
 WALL_LOST_MM = 1500        # Wall considered lost above this
 FRONT_STOP_MM = 400        # Stop if obstacle closer than this in front
 
 # Speed settings (0.0 to 1.0)
 FORWARD_SPEED = 0.35       # Base forward speed
-TURN_SPEED = 0.4           # Turn-in-place speed when front is blocked
-MAX_STEER_CORRECTION = 0.25  # Maximum steering correction (proportional)
-SEARCH_TURN_SPEED = 0.2    # Gentle turn speed when searching for lost wall
+TURN_SPEED = 0.3           # Turn-in-place speed when front is blocked
+MAX_STEER_CORRECTION = 0.12  # Max correction - gentle arc (too aggressive causes pivoting and overshoot)
+SEARCH_TURN_SPEED = 0.35   # Turn speed when searching for lost wall (was 0.2, too gentle)
 
 # Smoothing: median of last N scans per zone (rejects outliers)
 SCAN_HISTORY = 3
 
-# LIDAR zones (degrees) - right wall following
+# LIDAR: 0°=front, 90°=RIGHT, 180°=rear, 270°=LEFT
+# Wall zones WIDENED to 120° so wall stays visible during turns.
+# Without this, sharp turns push the wall out of the zone and LIDAR
+# picks up a different obstacle, causing sudden distance jumps.
 ZONES_RIGHT = {
-    'front':       (340, 20),
-    'front_wall':  (290, 340),
-    'wall':        (250, 290),
-    'back_wall':   (210, 250),
+    'front':       (340, 20),     # front = LIDAR 0°
+    'front_wall':  (20, 60),      # front-right (still used for angle)
+    'wall':        (30, 150),     # WIDE right zone (120° - stays visible in turns)
+    'back_wall':   (120, 170),    # back-right
 }
 
 ZONES_LEFT = {
-    'front':       (340, 20),
-    'front_wall':  (20, 70),
-    'wall':        (70, 110),
-    'back_wall':   (110, 150),
+    'front':       (340, 20),     # front = LIDAR 0°
+    'front_wall':  (300, 340),    # front-left
+    'wall':        (210, 330),    # WIDE left zone (120° - stays visible in turns)
+    'back_wall':   (190, 240),    # back-left
 }
 
 LOOP_INTERVAL = 0.1
@@ -104,7 +107,7 @@ def angle_in_zone(angle, zone_start, zone_end):
 
 
 def safe_round(val):
-    return round(val) if val != float('inf') else -1
+    return round(val) if val != float('inf') else 9999
 
 
 # ==================== WALL FOLLOWER ====================
@@ -168,35 +171,50 @@ class WallFollower:
         Receive a LIDAR scan from an external source (shared LIDAR).
         Called by the LIDAR thread in app.py or by our own LIDAR thread.
         """
-        # If auto-detecting, scan both sides to find the closer wall
+        # If auto-detecting, collect readings from both sides over several scans
         if self._auto_detect and not self._side_detected:
             left_min = float('inf')
             right_min = float('inf')
             for quality, angle, distance in scan:
-                if quality == 0 or distance == 0:
+                if quality == 0 or distance == 0 or distance < 200:
                     continue
-                # Check left zone (70-110)
-                if angle_in_zone(angle, 70, 110):
-                    left_min = min(left_min, distance)
-                # Check right zone (250-290)
-                if angle_in_zone(angle, 250, 290):
+                if angle_in_zone(angle, 60, 120):
                     right_min = min(right_min, distance)
+                if angle_in_zone(angle, 240, 300):
+                    left_min = min(left_min, distance)
 
-            # Pick the closer side once we have valid readings
-            if left_min != float('inf') or right_min != float('inf'):
-                if left_min < right_min:
+            # Track best readings across scans
+            if not hasattr(self, '_auto_left_best'):
+                self._auto_left_best = float('inf')
+                self._auto_right_best = float('inf')
+                self._auto_scan_count = 0
+
+            if left_min != float('inf'):
+                self._auto_left_best = min(self._auto_left_best, left_min)
+            if right_min != float('inf'):
+                self._auto_right_best = min(self._auto_right_best, right_min)
+            self._auto_scan_count += 1
+
+            # Decide after 5 scans (gives LIDAR time for full rotations)
+            if self._auto_scan_count >= 5:
+                if self._auto_left_best <= self._auto_right_best:
                     self.side = 'left'
                     self.zones = ZONES_LEFT
                 else:
                     self.side = 'right'
                     self.zones = ZONES_RIGHT
                 self._side_detected = True
+                self._history = {name: deque(maxlen=SCAN_HISTORY) for name in self.zones}
+                self.distances = {name: float('inf') for name in self.zones}
                 print(f"[WALL] Auto-detected: following {self.side.upper()} wall "
-                      f"(L:{safe_round(left_min)}mm R:{safe_round(right_min)}mm)")
+                      f"(L:{safe_round(self._auto_left_best)}mm R:{safe_round(self._auto_right_best)}mm)")
 
+        self._last_scan_time = time.time()
         zone_mins = {name: float('inf') for name in self.zones}
         for quality, angle, distance in scan:
             if quality == 0 or distance == 0:
+                continue
+            if distance < 200:
                 continue
             for zone_name, (start, end) in self.zones.items():
                 if angle_in_zone(angle, start, end):
@@ -234,16 +252,29 @@ class WallFollower:
     def _control_loop(self):
         """Main control loop."""
         prev_state = None
+        self._last_scan_time = time.time()
 
         while self._running:
             dist = self._get_distances()
             front = dist['front']
             wall = dist['wall']
 
+            # Safety: if no new scan data for 0.5s (LIDAR disconnected), stop
+            if time.time() - self._last_scan_time > 0.5:
+                self.robot.stop_wheels()
+                self.state = 'NO_LIDAR'
+                if self.state != prev_state:
+                    print(f"\n[WALL] NO LIDAR DATA - stopped")
+                    prev_state = self.state
+                time.sleep(LOOP_INTERVAL)
+                continue
+
             left_speed = 0.0
             right_speed = 0.0
+            front_wall = dist.get('front_wall', float('inf'))
+            back_wall = dist.get('back_wall', float('inf'))
 
-            # Case 1: Obstacle in front - turn away from wall
+            # Case 1: Obstacle in front - STOP, turn in place away from wall
             if front < FRONT_STOP_MM:
                 self.state = 'FRONT_BLOCKED'
                 if self.side == 'right':
@@ -253,74 +284,74 @@ class WallFollower:
                     left_speed = TURN_SPEED
                     right_speed = -TURN_SPEED
 
-            # Case 4: Wall lost - gently turn toward wall
+            # Case 4: Wall lost - drive forward slowly, slight turn toward wall
             elif wall > WALL_LOST_MM:
                 self.state = 'WALL_LOST'
+                search = 0.10
                 if self.side == 'right':
                     left_speed = self.forward_speed
-                    right_speed = self.forward_speed - SEARCH_TURN_SPEED
+                    right_speed = self.forward_speed - search
                 else:
-                    left_speed = self.forward_speed - SEARCH_TURN_SPEED
+                    left_speed = self.forward_speed - search
                     right_speed = self.forward_speed
 
-            # Case 2 & 3: Wall too close or too far - PROPORTIONAL steering.
-            # Correction scales with how far outside the dead band we are.
-            # Inside dead band [WALL_TOO_CLOSE, WALL_TOO_FAR] -> no correction.
-            elif wall < WALL_TOO_CLOSE_MM or wall > WALL_TOO_FAR_MM:
-                # Compute error: positive = too far, negative = too close
-                if wall < WALL_TOO_CLOSE_MM:
-                    self.state = 'TOO_CLOSE'
-                    error = wall - WALL_TOO_CLOSE_MM   # negative
-                    # Reference scale: distance from threshold to "lost"/closer bound
-                    ref = WALL_TOO_CLOSE_MM
-                else:
-                    self.state = 'TOO_FAR'
-                    error = wall - WALL_TOO_FAR_MM     # positive
-                    ref = WALL_LOST_MM - WALL_TOO_FAR_MM
-
-                # Normalize error to roughly [-1, 1] then scale by max correction.
-                # abs(error)/ref grows as we get further from dead band.
-                magnitude = min(1.0, abs(error) / max(1, ref))
+            # Gentle proportional correction - adjust ONE wheel only, small amount.
+            # Key insight: a 0.10 speed difference already produces a visible arc.
+            # Bigger differences cause pivoting (wall exits LIDAR zone -> chaos).
+            else:
+                error = wall - WALL_TARGET_MM
+                # Full correction at 300mm off - very gradual response
+                magnitude = min(1.0, abs(error) / 300.0)
                 correction = magnitude * MAX_STEER_CORRECTION
 
-                # Direction: positive correction means "steer toward wall", negative "steer away"
-                if error > 0:
-                    # Too far: steer toward the wall
-                    steer_toward = True
+                # Label state for debug
+                if abs(error) < 50:
+                    self.state = 'FOLLOWING'
+                elif error < 0:
+                    self.state = 'TOO_CLOSE'
                 else:
-                    # Too close: steer away from wall
-                    steer_toward = False
+                    self.state = 'TOO_FAR'
 
+                # Slow ONE wheel by correction amount, other stays at forward speed.
+                # Gentler than adjusting both. Max ratio: 0.35:0.23 ~ 1.5:1.
                 if self.side == 'right':
-                    if steer_toward:
-                        # Toward right wall: speed up left, slow down right
-                        left_speed = self.forward_speed + correction
+                    if error > 0:
+                        # Too far from right wall: turn right (slow right wheel)
+                        left_speed = self.forward_speed
                         right_speed = self.forward_speed - correction
                     else:
-                        # Away from right wall: slow down left, speed up right
+                        # Too close to right wall: turn left (slow left wheel)
                         left_speed = self.forward_speed - correction
-                        right_speed = self.forward_speed + correction
+                        right_speed = self.forward_speed
                 else:
-                    if steer_toward:
-                        # Toward left wall
+                    if error > 0:
+                        # Too far from left wall: turn left (slow left wheel)
                         left_speed = self.forward_speed - correction
-                        right_speed = self.forward_speed + correction
+                        right_speed = self.forward_speed
                     else:
-                        # Away from left wall
-                        left_speed = self.forward_speed + correction
+                        # Too close to left wall: turn right (slow right wheel)
+                        left_speed = self.forward_speed
                         right_speed = self.forward_speed - correction
 
-            # Default: in dead band, drive straight
-            else:
-                self.state = 'FOLLOWING'
-                left_speed = self.forward_speed
-                right_speed = self.forward_speed
+            # Clamp: never go backward except FRONT_BLOCKED
+            if self.state != 'FRONT_BLOCKED':
+                left_speed = max(0.05, left_speed)
+                right_speed = max(0.05, right_speed)
 
             self.robot.drive(left_speed, right_speed)
 
+            # Debug: always print distances so we can see if data is flowing
+            front_wall = dist.get('front_wall', float('inf'))
+            back_wall = dist.get('back_wall', float('inf'))
             if self.state != prev_state:
-                print(f"[WALL] {self.state:15s} | Front: {safe_round(front):5d}mm | Wall: {safe_round(wall):5d}mm")
+                print(f"\n[WALL] STATE: {self.state:15s} | Front: {safe_round(front):5d}mm | "
+                      f"Wall: {safe_round(wall):5d}mm | FW: {safe_round(front_wall):5d}mm | "
+                      f"BW: {safe_round(back_wall):5d}mm | L={left_speed:+.2f} R={right_speed:+.2f}")
                 prev_state = self.state
+            else:
+                print(f"[WALL] {self.state:15s} | F:{safe_round(front):5d} W:{safe_round(wall):5d} "
+                      f"FW:{safe_round(front_wall):5d} BW:{safe_round(back_wall):5d} "
+                      f"L={left_speed:+.2f} R={right_speed:+.2f}", end='\r')
 
             time.sleep(LOOP_INTERVAL)
 
@@ -376,9 +407,29 @@ def main():
     print(f"  WALL FOLLOWER - {side.upper()} side (standalone)")
     print(f"{'=' * 55}")
 
-    # Start LIDAR
-    lidar = RPLidar(LIDAR_PORT)
-    print(f"[LIDAR] Connected: {lidar.get_info()['model']}")
+    # Start LIDAR (retry if connection is flaky)
+    lidar = None
+    for attempt in range(5):
+        try:
+            lidar = RPLidar(LIDAR_PORT)
+            lidar.clean_input()
+            time.sleep(0.5)
+            lidar.clean_input()
+            print(f"[LIDAR] Connected: {lidar.get_info()['model']}")
+            break
+        except Exception as e:
+            print(f"[LIDAR] Attempt {attempt+1} failed: {e}")
+            if lidar:
+                try:
+                    lidar.disconnect()
+                except:
+                    pass
+                lidar = None
+            time.sleep(1)
+    if lidar is None:
+        print("[LIDAR] Could not connect after 5 attempts")
+        robot.close()
+        sys.exit(1)
 
     # Start follower
     follower.start()

@@ -77,13 +77,13 @@ LOOP_INTERVAL = 0.1
 # Smoothing: median of last N scans per zone (rejects outliers)
 SCAN_HISTORY = 3
 
-# LIDAR zones
+# LIDAR: 0°=front, 90°=RIGHT, 180°=rear, 270°=LEFT
 ZONES = {
-    'front':       (340, 20),
-    'front_left':  (20, 70),
-    'left':        (70, 110),
-    'front_right': (290, 340),
-    'right':       (250, 290),
+    'front':       (340, 20),     # front = LIDAR 0°
+    'front_left':  (300, 340),    # front-left
+    'left':        (240, 300),    # left side = LIDAR ~270°
+    'front_right': (20, 60),      # front-right
+    'right':       (60, 120),     # right side = LIDAR ~90°
 }
 
 
@@ -135,14 +135,14 @@ def listen_for_command(use_keyboard=False):
             print(f"[INPUT] Did not understand: '{text}'")
             return None
 
-    # Speech recognition (Option A)
+    # Speech recognition (Option A) - uses PulseAudio (device_index=5) for Bluetooth mic
     try:
         import speech_recognition as sr
         recognizer = sr.Recognizer()
-        with sr.Microphone() as source:
+        with sr.Microphone(device_index=5) as source:
             print("[LISTEN] Adjusting for ambient noise...")
             recognizer.adjust_for_ambient_noise(source, duration=1)
-            print("[LISTEN] Listening for command...")
+            print("[LISTEN] Listening... say 'bathroom' or 'robot lab'")
             audio = recognizer.listen(source, timeout=10, phrase_time_limit=5)
 
         print("[LISTEN] Processing speech...")
@@ -241,6 +241,9 @@ class RobotGreeter:
         zone_mins = {name: float('inf') for name in ZONES}
         for quality, angle, distance in scan:
             if quality == 0 or distance == 0:
+                continue
+            # Ignore readings under 200mm - robot's own body
+            if distance < 200:
                 continue
             for zone_name, (start, end) in ZONES.items():
                 if angle_in_zone(angle, start, end):
@@ -486,6 +489,7 @@ def main():
     print(f"{'=' * 55}")
 
     lidar = RPLidar(LIDAR_PORT)
+    lidar.clean_input()
     print(f"[LIDAR] Connected: {lidar.get_info()['model']}")
 
     greeter.start()

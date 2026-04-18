@@ -128,7 +128,9 @@ class RobotController:
                     self.servo.setTarget(channel, clamped_value)
                     return True
                 except Exception as e:
-                    print(f"ERROR setting {channel_name}: {e}")
+                    # Silent during shutdown (port closed) - not a real error
+                    if 'port that is not open' not in str(e):
+                        print(f"ERROR setting {channel_name}: {e}")
                     return False
             else:
                 print(f"[SIM] {channel_name} -> {clamped_value}")

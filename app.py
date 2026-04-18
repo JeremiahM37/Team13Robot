@@ -212,10 +212,14 @@ def stop():
     robot.stop_wheels()
     if action_runner:
         action_runner.interrupt()
-    # Stop autonomous modes too
+    # Stop autonomous modes too - ALSO remove their LIDAR callbacks
     if wall_follower and wall_follower.active:
+        if lidar:
+            lidar.remove_scan_callback(wall_follower.update_scan)
         wall_follower.stop()
     if greeter and greeter.active:
+        if lidar:
+            lidar.remove_scan_callback(greeter.update_scan)
         greeter.stop()
     return jsonify({'success': True})
 

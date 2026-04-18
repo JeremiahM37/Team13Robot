@@ -4,11 +4,11 @@ Lidar Safety Module
 Continuously scans using the RPLIDAR and sets front/rear blocked flags.
 Runs in a background thread so it doesn't block the Flask server.
 
-LIDAR Orientation:
-  - 0 degrees = directly in front of the robot
-  - 90 degrees = left side of the robot
-  - 180 degrees = directly behind the robot
-  - 270 degrees = right side of the robot
+LIDAR Orientation (left/right mirrored from standard):
+  - 0 degrees   = directly in FRONT of the robot
+  - 90 degrees  = RIGHT side of the robot
+  - 180 degrees = directly BEHIND the robot
+  - 270 degrees = LEFT side of the robot
 
 Detection Zones (60-degree cones):
   - Front danger zone: 330-360 and 0-30 degrees
@@ -46,8 +46,9 @@ STOP_DISTANCE_MM = 600         # Stop if obstacle closer than this
 # Front zone: 30 degrees each side of 0 = 330 to 30 (60 degree cone)
 FRONT_ZONE = (330, 30)
 
-# Rear zone: 30 degrees each side of 180 = 150 to 210 (60 degree cone)
-REAR_ZONE = (150, 210)
+# Rear zone: 14 degrees each side of 180 = 166 to 194 (28 degree cone)
+# Narrower than front to avoid seeing robot's own body
+REAR_ZONE = (166, 194)
 
 
 def angle_in_zone(angle, zone_start, zone_end):
@@ -125,9 +126,25 @@ class LidarSafety:
 
     def _scan_loop(self):
         """Main scanning loop - runs in background thread."""
+        import serial as _pyserial
         while self._running:
             try:
+                # Hard serial reset first to clear any stale data
+                try:
+                    _s = _pyserial.Serial(self.port, 115200, timeout=0.5)
+                    _s.write(b'\xa5\x25')  # RPLIDAR stop command
+                    time.sleep(0.1)
+                    _s.flushInput()
+                    _s.flushOutput()
+                    _s.close()
+                    time.sleep(0.3)
+                except Exception:
+                    pass
+
                 self._lidar = RPLidar(self.port)
+                self._lidar.clean_input()
+                time.sleep(0.3)
+                self._lidar.clean_input()
                 info = self._lidar.get_info()
                 print(f"[LIDAR] Connected: model {info['model']}, firmware {info['firmware']}")
                 health = self._lidar.get_health()
@@ -139,8 +156,11 @@ class LidarSafety:
                     self._process_scan(scan)
 
             except Exception as e:
-                print(f"[LIDAR] Error: {e}")
-                # Clean up and retry
+                # Only print first error and state changes, not every retry
+                if not getattr(self, '_last_error_msg', None) == str(e):
+                    print(f"[LIDAR] Error: {e}")
+                    self._last_error_msg = str(e)
+
                 if self._lidar:
                     try:
                         self._lidar.stop()
@@ -151,8 +171,7 @@ class LidarSafety:
                     self._lidar = None
 
                 if self._running:
-                    print("[LIDAR] Reconnecting in 2 seconds...")
-                    time.sleep(2)
+                    time.sleep(1.0)
 
     def _process_scan(self, scan):
         """
@@ -162,6 +181,7 @@ class LidarSafety:
         Each scan is a list of (quality, angle, distance) tuples.
         Quality 0 means invalid reading - skip those.
         Distance 0 also means invalid.
+        Readings under IGNORE_BELOW_MM are ignored (robot's own body).
         """
         # Forward scan to callbacks
         for cb in self._scan_callbacks:
@@ -175,6 +195,9 @@ class LidarSafety:
 
         for quality, angle, distance in scan:
             if quality == 0 or distance == 0:
+                continue
+            # Ignore readings under 200mm - these are the robot's own body
+            if distance < 200:
                 continue
 
             # Check front zone (330-360 and 0-30)
