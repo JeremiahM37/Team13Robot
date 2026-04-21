@@ -68,8 +68,8 @@ WALL_LOST_MM = 1500        # Wall considered lost above this
 FRONT_STOP_MM = 400        # Stop if obstacle closer than this in front
 
 # Speed settings (0.0 to 1.0)
-FORWARD_SPEED = 0.35       # Base forward speed
-TURN_SPEED = 0.3           # Turn-in-place speed when front is blocked
+FORWARD_SPEED = 0.005       # Base forward speed (was 0.35)
+TURN_SPEED = 0.03           # Turn-in-place speed when front is blocked (Was 0.3)
 MAX_STEER_CORRECTION = 0.12  # Max correction - gentle arc (too aggressive causes pivoting and overshoot)
 SEARCH_TURN_SPEED = 0.35   # Turn speed when searching for lost wall (was 0.2, too gentle)
 

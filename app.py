@@ -109,6 +109,22 @@ def drive():
     y, error = validate_float(data.get('y'), -1.0, 1.0, 'y')
     if error:
         return jsonify({'success': False, 'error': error}), 400
+
+    # If user is trying to drive (non-zero input), kill any autonomous mode
+    # so manual control takes over immediately.
+    if abs(x) > 0.01 or abs(y) > 0.01:
+        global wall_follower, greeter
+        if wall_follower and wall_follower.active:
+            if lidar:
+                lidar.remove_scan_callback(wall_follower.update_scan)
+            wall_follower.stop()
+            print("[APP] Wall follower stopped by manual drive input")
+        if greeter and greeter.active:
+            if lidar:
+                lidar.remove_scan_callback(greeter.update_scan)
+            greeter.stop()
+            print("[APP] Greeter stopped by manual drive input")
+
     success = robot.drive_joystick(x, y)
     result = {'success': success}
     if lidar:
