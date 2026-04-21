@@ -68,30 +68,39 @@ WALL_LOST_MM = 1500        # Wall considered lost above this
 FRONT_STOP_MM = 400        # Stop if obstacle closer than this in front
 
 # Speed settings (0.0 to 1.0)
-FORWARD_SPEED = 0.005       # Base forward speed (was 0.35)
-TURN_SPEED = 0.03           # Turn-in-place speed when front is blocked (Was 0.3)
-MAX_STEER_CORRECTION = 0.12  # Max correction - gentle arc (too aggressive causes pivoting and overshoot)
-SEARCH_TURN_SPEED = 0.35   # Turn speed when searching for lost wall (was 0.2, too gentle)
+FORWARD_SPEED = 0.005       # Base forward speed
+TURN_SPEED = 0.03           # Turn-in-place speed when front is blocked
+MAX_STEER_CORRECTION = 0.12  # Cap on PD steering magnitude
+SEARCH_TURN_SPEED = 0.35    # Turn speed when searching for lost wall
+
+# PD gains for two-ray wall following. Error terms are in mm; gains convert
+# to the 0-1 speed scale. Increase for snappier tracking, decrease if oscillating.
+WALL_KP = 0.0008            # Distance error gain (wall - target)
+WALL_KD = 0.0006            # Angle error gain (forward_ray - back_ray)
 
 # Smoothing: median of last N scans per zone (rejects outliers)
 SCAN_HISTORY = 3
 
 # LIDAR: 0°=front, 90°=RIGHT, 180°=rear, 270°=LEFT
-# Wall zones WIDENED to 120° so wall stays visible during turns.
-# Without this, sharp turns push the wall out of the zone and LIDAR
-# picks up a different obstacle, causing sudden distance jumps.
+# Zones are narrow, symmetric rays around perpendicular. The two off-perpendicular
+# rays (front_wall, back_wall) compare lengths to infer the wall's angle relative
+# to the robot — the D-term of the PD controller.
+#   front_wall (forward ray)   hits wall ahead of perpendicular
+#   wall       (perpendicular) gives distance to wall
+#   back_wall  (rearward ray)  hits wall behind perpendicular
+# When parallel: front_ray ≈ back_ray. Angled into wall: front < back. Angled away: front > back.
 ZONES_RIGHT = {
-    'front':       (340, 20),     # front = LIDAR 0°
-    'front_wall':  (20, 60),      # front-right (still used for angle)
-    'wall':        (30, 150),     # WIDE right zone (120° - stays visible in turns)
-    'back_wall':   (120, 170),    # back-right
+    'front':       (340, 20),     # front cone (collision avoidance)
+    'front_wall':  (45, 75),      # forward-right ray  (centered 60°)
+    'wall':        (75, 105),     # perpendicular right (centered 90°)
+    'back_wall':   (105, 135),    # back-right ray     (centered 120°)
 }
 
 ZONES_LEFT = {
-    'front':       (340, 20),     # front = LIDAR 0°
-    'front_wall':  (300, 340),    # front-left
-    'wall':        (210, 330),    # WIDE left zone (120° - stays visible in turns)
-    'back_wall':   (190, 240),    # back-left
+    'front':       (340, 20),     # front cone
+    'front_wall':  (285, 315),    # forward-left ray   (centered 300°)
+    'wall':        (255, 285),    # perpendicular left (centered 270°)
+    'back_wall':   (225, 255),    # back-left ray      (centered 240°)
 }
 
 LOOP_INTERVAL = 0.1
@@ -295,48 +304,40 @@ class WallFollower:
                     left_speed = self.forward_speed - search
                     right_speed = self.forward_speed
 
-            # Gentle proportional correction - adjust ONE wheel only, small amount.
-            # Key insight: a 0.10 speed difference already produces a visible arc.
-            # Bigger differences cause pivoting (wall exits LIDAR zone -> chaos).
+            # Two-ray PD wall following.
+            # Distance error: + means too far from wall, - means too close.
+            # Angle error (front_ray - back_ray): + means heading away from wall,
+            # - means heading into wall. Combined, they give symmetric micro-adjustments.
             else:
-                error = wall - WALL_TARGET_MM
-                # Full correction at 300mm off - very gradual response
-                magnitude = min(1.0, abs(error) / 300.0)
-                correction = magnitude * MAX_STEER_CORRECTION
+                distance_error = wall - WALL_TARGET_MM
 
-                # Label state for debug
-                if abs(error) < 50:
+                if front_wall != float('inf') and back_wall != float('inf'):
+                    angle_error = front_wall - back_wall
+                else:
+                    angle_error = 0.0  # fall back to P-only when a ray is missing
+
+                # Steering sign convention: positive = turn TOWARD the followed wall.
+                turn_toward_wall = WALL_KP * distance_error + WALL_KD * angle_error
+                turn_toward_wall = max(-MAX_STEER_CORRECTION,
+                                       min(MAX_STEER_CORRECTION, turn_toward_wall))
+
+                if abs(distance_error) < 50:
                     self.state = 'FOLLOWING'
-                elif error < 0:
+                elif distance_error < 0:
                     self.state = 'TOO_CLOSE'
                 else:
                     self.state = 'TOO_FAR'
 
-                # Slow ONE wheel by correction amount, other stays at forward speed.
-                # Gentler than adjusting both. Max ratio: 0.35:0.23 ~ 1.5:1.
-                if self.side == 'right':
-                    if error > 0:
-                        # Too far from right wall: turn right (slow right wheel)
-                        left_speed = self.forward_speed
-                        right_speed = self.forward_speed - correction
-                    else:
-                        # Too close to right wall: turn left (slow left wheel)
-                        left_speed = self.forward_speed - correction
-                        right_speed = self.forward_speed
-                else:
-                    if error > 0:
-                        # Too far from left wall: turn left (slow left wheel)
-                        left_speed = self.forward_speed - correction
-                        right_speed = self.forward_speed
-                    else:
-                        # Too close to left wall: turn right (slow right wheel)
-                        left_speed = self.forward_speed
-                        right_speed = self.forward_speed - correction
+                # Right-wall: toward-wall = rotate clockwise = left faster than right.
+                # Left-wall:  toward-wall = rotate counter-clockwise = right faster.
+                turn = turn_toward_wall if self.side == 'right' else -turn_toward_wall
+                left_speed = self.forward_speed + turn
+                right_speed = self.forward_speed - turn
 
             # Clamp: never go backward except FRONT_BLOCKED
             if self.state != 'FRONT_BLOCKED':
-                left_speed = max(0.05, left_speed)
-                right_speed = max(0.05, right_speed)
+                left_speed = max(0.0, left_speed)
+                right_speed = max(0.0, right_speed)
 
             self.robot.drive(left_speed, right_speed)
 
