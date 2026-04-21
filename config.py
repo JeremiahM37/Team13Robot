@@ -41,18 +41,18 @@ SERVO_LIMITS = {
         'max': 7500,
         'center': 6000,  # Neutral/stop position for continuous rotation
         'forward_min': 5000,  # At or below this = forward (lower = faster)
-        'forward_max': 4500,  # Max forward speed
+        'forward_max': 4800,  # Max forward speed
         'reverse_min': 7000,  # At or above this = reverse (higher = faster)
-        'reverse_max': 7500,  # Max reverse speed
+        'reverse_max': 7200,  # Max reverse speed
     },
     'right_wheel': {
         'min': 4500,
         'max': 7750,
         'center': 6000,
         'forward_min': 7000,
-        'forward_max': 7500,  # Max forward speed
+        'forward_max': 7200,  # Max forward speed
         'reverse_min': 5000,
-        'reverse_max': 4500,  # Max reverse speed
+        'reverse_max': 4800,  # Max reverse speed
     },
     'head_tilt': {
         'min': 7500,

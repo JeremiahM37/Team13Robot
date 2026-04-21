@@ -211,35 +211,20 @@ class RobotController:
         if abs(y) > 0.3 and abs(x) < 0.15:
             x = 0
 
-        # LIDAR safety check: block forward/backward if obstacle too close.
-        HARD_STOP_MM = 400
+        # LIDAR safety check: block forward/backward if obstacle detected
         SAFETY_DEADZONE = 0.05
         if self.lidar:
-            front_dist = getattr(self.lidar, '_front_min_dist', float('inf'))
-            rear_dist = getattr(self.lidar, '_rear_min_dist', float('inf'))
-            if y > SAFETY_DEADZONE and front_dist < HARD_STOP_MM:
-                print(f"[SAFETY] Forward BLOCKED - obstacle at {front_dist:.0f}mm")
+            if y > SAFETY_DEADZONE and self.lidar.front_blocked:
+                print(f"[SAFETY] Forward BLOCKED by obstacle - ignoring forward (y={y:.2f})")
                 y = 0
-            if y < -SAFETY_DEADZONE and rear_dist < HARD_STOP_MM:
-                print(f"[SAFETY] Reverse BLOCKED - obstacle at {rear_dist:.0f}mm")
+            if y < -SAFETY_DEADZONE and self.lidar.rear_blocked:
+                print(f"[SAFETY] Reverse BLOCKED by obstacle - ignoring backward (y={y:.2f})")
                 y = 0
 
         # Convert joystick to differential drive
         # Forward/backward is y, turning is x
         left_speed = y + x
         right_speed = y - x
-
-        # Drift compensation: when driving straight (no turning input),
-        # apply a constant bias to counter hardware drift.
-        # Positive value biases LEFT wheel faster (fixes rightward drift).
-        # Negative biases RIGHT wheel faster (fixes leftward drift).
-        # Set to 0 if no drift. Tune by trial and error.
-        DRIFT_COMPENSATION = 0.05
-        if abs(x) < 0.05 and abs(y) > 0.05:
-            # Going straight forward or backward - apply drift correction
-            direction = 1 if y > 0 else -1
-            left_speed += DRIFT_COMPENSATION * direction
-            right_speed -= DRIFT_COMPENSATION * direction
 
         # Normalize if needed (keep proportions but limit to -1 to 1)
         max_magnitude = max(abs(left_speed), abs(right_speed))

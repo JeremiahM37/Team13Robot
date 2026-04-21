@@ -196,8 +196,8 @@ class LidarSafety:
         for quality, angle, distance in scan:
             if quality == 0 or distance == 0:
                 continue
-            # Ignore readings under 200mm - these are the robot's own body
-            if distance < 200:
+            # Ignore readings under 100mm - these are the robot's own body
+            if distance < 100:
                 continue
 
             # Check front zone (330-360 and 0-30)
