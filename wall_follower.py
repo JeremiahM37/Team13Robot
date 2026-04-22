@@ -68,8 +68,8 @@ WALL_LOST_MM = 1500        # Wall considered lost above this
 FRONT_STOP_MM = 400        # Stop if obstacle closer than this in front
 
 # Speed settings (0.0 to 1.0)
-FORWARD_SPEED = 0.005       # Base forward speed
-TURN_SPEED = 0.03           # Turn-in-place speed when front is blocked
+FORWARD_SPEED = 0.2         # Base forward speed
+TURN_SPEED = 0.3            # Turn-in-place speed when front is blocked
 MAX_STEER_CORRECTION = 0.12  # Cap on PD steering magnitude
 SEARCH_TURN_SPEED = 0.35    # Turn speed when searching for lost wall
 
@@ -113,6 +113,17 @@ def angle_in_zone(angle, zone_start, zone_end):
         return zone_start <= angle <= zone_end
     else:
         return angle >= zone_start or angle <= zone_end
+
+
+def is_body_return(angle, distance):
+    """
+    True if a scan point should be rejected as a reflection off the robot's
+    own body. The right side protrudes further than the left, so the cutoff
+    is larger in the right-side arc (45°-135°).
+    """
+    if 45 <= angle <= 135:
+        return distance < 200
+    return distance < 100
 
 
 def safe_round(val):
@@ -185,7 +196,9 @@ class WallFollower:
             left_min = float('inf')
             right_min = float('inf')
             for quality, angle, distance in scan:
-                if quality == 0 or distance == 0 or distance < 200:
+                if quality == 0 or distance == 0:
+                    continue
+                if is_body_return(angle, distance):
                     continue
                 if angle_in_zone(angle, 60, 120):
                     right_min = min(right_min, distance)
@@ -223,7 +236,7 @@ class WallFollower:
         for quality, angle, distance in scan:
             if quality == 0 or distance == 0:
                 continue
-            if distance < 200:
+            if is_body_return(angle, distance):
                 continue
             for zone_name, (start, end) in self.zones.items():
                 if angle_in_zone(angle, start, end):

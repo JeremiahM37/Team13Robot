@@ -196,8 +196,12 @@ class LidarSafety:
         for quality, angle, distance in scan:
             if quality == 0 or distance == 0:
                 continue
-            # Ignore readings under 100mm - these are the robot's own body
-            if distance < 100:
+            # Ignore readings from the robot's own body. The right side protrudes
+            # further than the left, so use a larger cutoff for the right arc.
+            if 45 <= angle <= 135:
+                if distance < 200:
+                    continue
+            elif distance < 100:
                 continue
 
             # Check front zone (330-360 and 0-30)
