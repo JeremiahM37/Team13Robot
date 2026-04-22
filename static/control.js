@@ -269,7 +269,9 @@ document.querySelectorAll('.voice-btn').forEach(btn => {
 const autoStatusEl = document.getElementById('auto-status');
 
 async function startWallFollow(side) {
-    const result = await apiCall('/api/wall-follow/start', { side: side, speed: 0.35 });
+    // Speed intentionally omitted so the server uses wall_follower.FORWARD_SPEED
+    // as the single source of truth. Edit that constant to change speed.
+    const result = await apiCall('/api/wall-follow/start', { side: side });
     if (result.success) {
         autoStatusEl.textContent = `Wall Follow (${side}) - running`;
         autoStatusEl.className = 'auto-status auto-active';

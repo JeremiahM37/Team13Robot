@@ -31,7 +31,7 @@ from robot_control import RobotController, SafetyWatchdog
 from dialog_engine import DialogEngine
 from action_runner import ActionRunner
 from lidar_safety import LidarSafety
-from wall_follower import WallFollower
+from wall_follower import WallFollower, FORWARD_SPEED as WALL_FORWARD_SPEED
 from greeter import RobotGreeter
 
 # Initialize Flask app
@@ -255,7 +255,9 @@ def wall_follow_start():
 
     data = request.get_json() or {}
     side = data.get('side', 'right')
-    speed = float(data.get('speed', 0.35))
+    # Default to wall_follower.FORWARD_SPEED so editing that constant actually
+    # takes effect. Only respect the request's speed if it's explicitly provided.
+    speed = float(data['speed']) if 'speed' in data else WALL_FORWARD_SPEED
 
     wall_follower = WallFollower(robot, side=side, speed=speed)
     if lidar:

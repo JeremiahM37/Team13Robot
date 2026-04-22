@@ -376,7 +376,7 @@ def main():
         idx = sys.argv.index('--speed')
         if idx + 1 < len(sys.argv):
             try:
-                speed = max(0.1, min(1.0, float(sys.argv[idx + 1])))
+                speed = max(0.0, min(1.0, float(sys.argv[idx + 1])))
             except ValueError:
                 pass
 
