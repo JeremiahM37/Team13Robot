@@ -61,25 +61,25 @@ from robot_control import RobotController
 LIDAR_PORT = '/dev/ttyUSB0'
 
 # Wall following parameters (mm)
-WALL_TARGET_MM = 600       # Ideal distance from wall (~60cm, good for 2m hallway)
-WALL_TOO_CLOSE_MM = 450    # Steer away below this
-WALL_TOO_FAR_MM = 750      # Steer toward above this
-WALL_LOST_MM = 1500        # Wall considered lost above this
-FRONT_STOP_MM = 400        # Stop if obstacle closer than this in front
+WALL_TARGET_MM = 750       # Ideal distance from wall (~60cm, good for 2m hallway)
+WALL_TOO_CLOSE_MM = 730    # Steer away below this
+WALL_TOO_FAR_MM = 780      # Steer toward above this
+WALL_LOST_MM = 3000        # Wall considered lost above this
+FRONT_STOP_MM = 600        # Stop if obstacle closer than this in front
 
 # Speed settings (0.0 to 1.0)
-FORWARD_SPEED = 0.2         # Base forward speed
-TURN_SPEED = 0.3            # Turn-in-place speed when front is blocked
-MAX_STEER_CORRECTION = 0.12  # Cap on PD steering magnitude
-SEARCH_TURN_SPEED = 0.35    # Turn speed when searching for lost wall
+FORWARD_SPEED = 0.4         # Base forward speed (was 0.2)
+TURN_SPEED = 0.1            # Turn-in-place speed when front is blocked (was 0.3)
+MAX_STEER_CORRECTION = 0.35  # Cap on PD steering magnitude
+SEARCH_TURN_SPEED = 0.2    # Turn speed when searching for lost wall
 
 # PD gains for two-ray wall following. Error terms are in mm; gains convert
 # to the 0-1 speed scale. Increase for snappier tracking, decrease if oscillating.
-WALL_KP = 0.0008            # Distance error gain (wall - target)
-WALL_KD = 0.0006            # Angle error gain (forward_ray - back_ray)
+WALL_KP = 0.0008            # Distance error gain (wall - target) (was 0.0008)
+WALL_KD = 0.0006            # Angle error gain (forward_ray - back_ray) (was 0.0006)
 
 # Smoothing: median of last N scans per zone (rejects outliers)
-SCAN_HISTORY = 3
+SCAN_HISTORY = 1
 
 # LIDAR: 0°=front, 90°=RIGHT, 180°=rear, 270°=LEFT
 # Zones are narrow, symmetric rays around perpendicular. The two off-perpendicular
@@ -149,6 +149,7 @@ class WallFollower:
         """
         self.robot = robot
         self.side = side
+        
         self._auto_detect = (side == 'auto')
         self._side_detected = False
         # Default to right zones until auto-detect picks a side
@@ -309,7 +310,7 @@ class WallFollower:
             # Case 4: Wall lost - drive forward slowly, slight turn toward wall
             elif wall > WALL_LOST_MM:
                 self.state = 'WALL_LOST'
-                search = 0.10
+                search = 0.4
                 if self.side == 'right':
                     left_speed = self.forward_speed
                     right_speed = self.forward_speed - search
@@ -332,7 +333,7 @@ class WallFollower:
                 # Steering sign convention: positive = turn TOWARD the followed wall.
                 turn_toward_wall = WALL_KP * distance_error + WALL_KD * angle_error
                 turn_toward_wall = max(-MAX_STEER_CORRECTION,
-                                       min(MAX_STEER_CORRECTION, turn_toward_wall))
+                                       min(MAX_STEER_CORRECTION, turn_toward_wall)) 
 
                 if abs(distance_error) < 50:
                     self.state = 'FOLLOWING'
@@ -349,10 +350,10 @@ class WallFollower:
 
             # Clamp: never go backward except FRONT_BLOCKED
             if self.state != 'FRONT_BLOCKED':
-                left_speed = max(0.0, left_speed)
-                right_speed = max(0.0, right_speed)
+                left_speed = max(0.0, left_speed) #left_speed
+                right_speed = max(0.0, right_speed) #right_speed
 
-            self.robot.drive(left_speed, right_speed)
+            self.robot.drive(left_speed, right_speed) #TODO: Fix turn function
 
             # Debug: always print distances so we can see if data is flowing
             front_wall = dist.get('front_wall', float('inf'))

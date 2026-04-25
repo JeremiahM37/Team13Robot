@@ -44,6 +44,7 @@ import subprocess
 from collections import deque
 from rplidar import RPLidar
 from robot_control import RobotController
+from wall_follower import WallFollower
 
 # ==================== CONFIGURATION ====================
 
@@ -187,6 +188,7 @@ class RobotGreeter:
     MOVING_TO_T = 'MOVING_TO_T'
     TURNING_TO_DEST = 'TURNING_TO_DESTINATION'
     FINAL_MOVE = 'FINAL_MOVEMENT'
+    WALL_FOLLOWING = 'WALL_FOLLOWING'
     STOPPED = 'STOPPED'
 
     def __init__(self, robot, use_keyboard=False):
@@ -201,6 +203,7 @@ class RobotGreeter:
         self.state = self.WAITING
         self.destination = None
         self.state_start_time = time.time()
+        self._wall_follower = None
 
         self._lock = threading.Lock()
         self.distances = {name: float('inf') for name in ZONES}
@@ -229,6 +232,9 @@ class RobotGreeter:
     def stop(self):
         """Stop greeter FSM."""
         self._running = False
+        if self._wall_follower:
+            self._wall_follower.stop()
+            self._wall_follower = None
         if self._thread:
             self._thread.join(timeout=2.0)
             self._thread = None
@@ -238,6 +244,10 @@ class RobotGreeter:
 
     def update_scan(self, scan):
         """Receive a LIDAR scan from an external source. Applies median smoothing."""
+        # Forward to internal wall follower if running
+        if self._wall_follower and self._wall_follower.active:
+            self._wall_follower.update_scan(scan)
+
         zone_mins = {name: float('inf') for name in ZONES}
         for quality, angle, distance in scan:
             if quality == 0 or distance == 0:
@@ -308,6 +318,8 @@ class RobotGreeter:
                 self._handle_turning_to_dest(dist)
             elif self.state == self.FINAL_MOVE:
                 self._handle_final_move(dist)
+            elif self.state == self.WALL_FOLLOWING:
+                self._handle_wall_following(dist)
             elif self.state == self.STOPPED:
                 self._handle_stopped(dist)
 
@@ -338,12 +350,17 @@ class RobotGreeter:
             speak_and_wait("Sorry, I did not understand. Please say bathroom or robot lab.")
 
     def _handle_turning_around(self, dist):
-        """TURNING_AROUND: Rotate 180 degrees."""
+        """TURNING_AROUND: Rotate 180 degrees, then start the wall follower."""
         if self._state_elapsed() < TURN_180_DURATION:
             self.robot.drive(-TURN_SPEED, TURN_SPEED)
         else:
             self.robot.stop_wheels()
-            self._set_state(self.ALIGNING)
+            # bathroom is on the left, robot lab is on the right
+            side = 'left' if self.destination == 'bathroom' else 'right'
+            print(f"[GREETER] Starting wall follower on {side.upper()} side")
+            self._wall_follower = WallFollower(self.robot, side=side)
+            self._wall_follower.start()
+            self._set_state(self.WALL_FOLLOWING)
 
     def _handle_aligning(self, dist):
         """ALIGNING: Move forward until walls on both sides detected."""
@@ -441,6 +458,11 @@ class RobotGreeter:
             self.robot.stop_wheels()
         else:
             self.robot.drive(FORWARD_SPEED, FORWARD_SPEED)
+
+    def _handle_wall_following(self, dist):
+        """WALL_FOLLOWING: WallFollower owns the drive loop. Greeter just idles."""
+        # The WallFollower thread is driving. Nothing to do here.
+        pass
 
     def _handle_stopped(self, dist):
         """STOPPED: Announce arrival."""
