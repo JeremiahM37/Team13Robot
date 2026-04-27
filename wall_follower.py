@@ -64,7 +64,7 @@ LIDAR_PORT = '/dev/ttyUSB0'
 WALL_TARGET_MM = 750       # Ideal distance from wall (~60cm, good for 2m hallway)
 WALL_TOO_CLOSE_MM = 730    # Steer away below this
 WALL_TOO_FAR_MM = 780      # Steer toward above this
-WALL_LOST_MM = 3000        # Wall considered lost above this
+WALL_LOST_MM = 2000        # Wall considered lost above this
 FRONT_STOP_MM = 600        # Stop if obstacle closer than this in front
 
 # Speed settings (0.0 to 1.0)
