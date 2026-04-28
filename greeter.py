@@ -49,35 +49,40 @@ LIDAR_PORT = '/dev/ttyUSB0'
 # Human detection
 HUMAN_DETECT_MM = 1000
 
-# Speed/timing for the 180° turn-around step
-TURN_SPEED = 0.7
-TURN_180_DURATION = 2.5    # Tune this on real robot!
+# Speeds (0.0-1.0)
+FORWARD_SPEED = 0.3        # Used by ALIGNING_TO_HALLWAY and FINAL_MOVEMENT
+TURN_SPEED = 0.7           # In-place rotation speed
 
-# Wall-follow durations per destination (seconds). The timer starts AFTER the
-# robot has turned the corner into the doorway, so this is just the post-corner
-# drive distance — bathroom and lab are both close to their doorways.
-BATHROOM_FOLLOW_DURATION = 5.0
-LAB_FOLLOW_DURATION = 1.0
+# Step durations (seconds) — tune on real robot!
+TURN_180_DURATION = 2.5    # 180° turn time
+TURN_90_DURATION = 1.5     # 90° turn time at the T
+FINAL_DRIVE_DURATION = 5.0 # Forward time after the T turn
 
-# Corner-turn detection (uses perpendicular wall distance from WallFollower).
-# WALL_PRESENT_MM:    wall is "acquired" once perpendicular ray is below this
-# WALL_OPENING_MM:    doorway opening declared once perpendicular ray exceeds this
-# CORNER_TURN_TIMEOUT: max seconds to wait for the corner turn before assuming
-#                     it completed (fallback when wall isn't reacquired in the
-#                     destination room because it has no near-side wall)
-WALL_PRESENT_MM = 1200
-WALL_OPENING_MM = 1500
-CORNER_TURN_TIMEOUT = 4.0
+# Hallway alignment: both side walls must be within this for ALIGNING done
+ALIGN_WALL_MAX_MM = 2000
+ALIGN_TIMEOUT = 4.0        # Give up alignment after this and proceed anyway
+
+# T-intersection detection
+T_FRONT_MM = 600           # Wall in front closer than this
+T_SIDE_OPEN_MM = 1200      # Side wall further than this = opening
+T_CONFIRM_SCANS = 3        # Require N consecutive scans confirming T pattern
+
+# Front obstacle stop (used during ALIGNING and FINAL_MOVEMENT)
+FRONT_STOP_MM = 400
 
 LOOP_INTERVAL = 0.1
 
-# Smoothing: median of last N scans for human detection
-SCAN_HISTORY = 1
+# Smoothing: median of last N scans per zone
+SCAN_HISTORY = 3
 
-# Only the front cone is used here (human detection). Wall-follow zones
-# live in wall_follower.py.
+# LIDAR zones (degrees). 0°=front, 90°=RIGHT side, 180°=rear, 270°=LEFT side.
+# (Mirrored convention — see lidar_safety.py header.) WallFollower has its
+# own zones; these are used here for human detection, hallway alignment,
+# and T-intersection detection.
 ZONES = {
-    'front': (340, 20),  # LIDAR 0° = forward
+    'front': (340, 20),    # forward cone
+    'right': (60, 120),    # 90° = right side of robot
+    'left':  (240, 300),   # 270° = left side of robot
 }
 
 
@@ -163,22 +168,24 @@ class RobotGreeter:
     Finite State Machine for the autonomous greeter robot.
 
     State transitions:
-        WAITING -> GREETING            (human detected in front)
-        GREETING -> LISTENING          (after greeting spoken)
-        LISTENING -> TURNING_AROUND    (valid command received)
-        TURNING_AROUND -> WALL_FOLLOWING (180 turn complete; spawn WallFollower)
-        TURNING_TO_DESTINATION          TODO: (Turns in place in the intersection.
-        FINAL_APPROACH                  TODO: (Final approach to the destination. This is time-based.)
-        WALL_FOLLOWING -> STOPPED      (per-destination duration elapsed)
+        WAITING -> GREETING                 (human detected in front)
+        GREETING -> LISTENING               (after greeting spoken)
+        LISTENING -> TURNING_AROUND         (valid command received)
+        TURNING_AROUND -> ALIGNING_TO_HALLWAY  (180° turn complete)
+        ALIGNING_TO_HALLWAY -> MOVING_TO_T  (walls on both sides detected)
+        MOVING_TO_T -> TURNING_TO_DESTINATION  (T-intersection confirmed)
+        TURNING_TO_DESTINATION -> FINAL_MOVEMENT  (90° turn complete)
+        FINAL_MOVEMENT -> STOPPED           (5s drive elapsed)
     """
 
     WAITING = 'WAITING'
     GREETING = 'GREETING'
     LISTENING = 'LISTENING'
     TURNING_AROUND = 'TURNING_AROUND'
-    WALL_FOLLOWING = 'WALL_FOLLOWING'
+    ALIGNING_TO_HALLWAY = 'ALIGNING_TO_HALLWAY'
+    MOVING_TO_T = 'MOVING_TO_T'
     TURNING_TO_DESTINATION = 'TURNING_TO_DESTINATION'
-    FINAL_APPROACH = 'FINAL_APPROACH'
+    FINAL_MOVEMENT = 'FINAL_MOVEMENT'
     STOPPED = 'STOPPED'
 
     def __init__(self, robot, use_keyboard=False):
@@ -194,17 +201,10 @@ class RobotGreeter:
         self.destination = None
         self.state_start_time = time.time()
         self._wall_follower = None
-        # Corner-detection bookkeeping for WALL_FOLLOWING. We watch the
-        # perpendicular-wall distance reported by the WallFollower:
-        #   1) wall acquired — perpendicular < WALL_PRESENT_MM (we're tracking)
-        #   2) opening seen  — perpendicular > WALL_OPENING_MM (doorway visible)
-        #   3) corner turned — perpendicular drops back below WALL_PRESENT_MM
-        #                       OR CORNER_TURN_TIMEOUT seconds elapse since (2)
-        # The destination drive timer only starts after step 3.
-        self._wf_acquired = False
-        self._wf_opened = False
-        self._opening_time = None
-        self._corner_turn_time = None
+        # T-intersection detection: require T_CONFIRM_SCANS consecutive scans
+        # showing the T pattern (front wall close + at least one side opening)
+        # to avoid false positives from transient readings.
+        self._t_confirm_count = 0
 
         self._lock = threading.Lock()
         self.distances = {name: float('inf') for name in ZONES}
@@ -278,6 +278,8 @@ class RobotGreeter:
             'state': self.state,
             'destination': self.destination,
             'front': safe_round(d.get('front', -1)),
+            'left':  safe_round(d.get('left', -1)),
+            'right': safe_round(d.get('right', -1)),
         }
 
     def _get_distances(self):
@@ -307,8 +309,14 @@ class RobotGreeter:
                 self._handle_listening(dist)
             elif self.state == self.TURNING_AROUND:
                 self._handle_turning_around(dist)
-            elif self.state == self.WALL_FOLLOWING:
-                self._handle_wall_following(dist)
+            elif self.state == self.ALIGNING_TO_HALLWAY:
+                self._handle_aligning(dist)
+            elif self.state == self.MOVING_TO_T:
+                self._handle_moving_to_t(dist)
+            elif self.state == self.TURNING_TO_DESTINATION:
+                self._handle_turning_to_dest(dist)
+            elif self.state == self.FINAL_MOVEMENT:
+                self._handle_final_movement(dist)
             elif self.state == self.STOPPED:
                 self._handle_stopped(dist)
 
@@ -339,72 +347,101 @@ class RobotGreeter:
             speak_and_wait("Sorry, I did not understand. Please say bathroom or robot lab.")
 
     def _handle_turning_around(self, dist):
-        """TURNING_AROUND: Rotate 180 degrees, then start the wall follower."""
+        """TURNING_AROUND: Rotate 180° in place to face down the hallway."""
         if self._state_elapsed() < TURN_180_DURATION:
             self.robot.drive(-TURN_SPEED, TURN_SPEED)
         else:
             self.robot.stop_wheels()
-            # bathroom is on the left, robot lab is on the right
+            self._set_state(self.ALIGNING_TO_HALLWAY)
+
+    def _handle_aligning(self, dist):
+        """ALIGNING_TO_HALLWAY: Move forward until walls on both sides are
+        within ALIGN_WALL_MAX_MM. Falls through to MOVING_TO_T after
+        ALIGN_TIMEOUT to avoid stalling if a side reading is noisy."""
+        left = dist['left']
+        right = dist['right']
+        front = dist['front']
+
+        both_walls = left < ALIGN_WALL_MAX_MM and right < ALIGN_WALL_MAX_MM
+        timed_out = self._state_elapsed() >= ALIGN_TIMEOUT
+
+        if both_walls or timed_out:
+            reason = "walls visible" if both_walls else f"timeout {ALIGN_TIMEOUT}s"
+            print(f"[GREETER] Hallway aligned ({reason}) "
+                  f"L:{safe_round(left)} R:{safe_round(right)}")
+            self.robot.stop_wheels()
+            # Hand off to WallFollower for MOVING_TO_T. Pick the side closer to
+            # the destination: bathroom (left at T) -> follow left wall;
+            # lab (right at T) -> follow right wall. This biases the path
+            # toward the destination side of the hallway.
             side = 'left' if self.destination == 'bathroom' else 'right'
             print(f"[GREETER] Starting wall follower on {side.upper()} side")
             self._wall_follower = WallFollower(self.robot, side=side)
             self._wall_follower.start()
-            self._wf_acquired = False
-            self._wf_opened = False
-            self._opening_time = None
-            self._corner_turn_time = None
-            self._set_state(self.WALL_FOLLOWING)
+            self._t_confirm_count = 0
+            self._set_state(self.MOVING_TO_T)
+            return
 
-    def _handle_wall_following(self, dist):
-        """WALL_FOLLOWING: WallFollower owns the drive loop. We watch the
-        perpendicular-wall distance to detect the corner turn at the doorway:
-          acquired (< WALL_PRESENT_MM) -> opening (> WALL_OPENING_MM)
-          -> corner turned (back below WALL_PRESENT_MM, OR timeout)
-        Then we count down the per-destination duration and stop.
+        # Forward at half speed; stop if obstacle in front
+        if front < FRONT_STOP_MM:
+            self.robot.stop_wheels()
+        else:
+            half = FORWARD_SPEED * 0.5
+            self.robot.drive(half, half)
+
+    def _handle_moving_to_t(self, dist):
+        """MOVING_TO_T: WallFollower drives down the hallway. We watch our
+        own LIDAR scans for the T-intersection pattern: front wall close
+        (< T_FRONT_MM) AND at least one side open (> T_SIDE_OPEN_MM).
+        T_CONFIRM_SCANS consecutive matches confirm to filter false positives.
         """
-        if not self._wall_follower:
-            return
+        front = dist['front']
+        left  = dist['left']
+        right = dist['right']
 
-        wall = self._wall_follower.distances.get('wall', float('inf'))
+        front_close = front < T_FRONT_MM
+        side_open = left > T_SIDE_OPEN_MM or right > T_SIDE_OPEN_MM
 
-        # Step 1: confirm we acquired a wall before looking for an opening
-        if not self._wf_acquired:
-            if wall < WALL_PRESENT_MM:
-                self._wf_acquired = True
-                print(f"[GREETER] Wall acquired at {wall:.0f}mm - watching for doorway")
-            return
+        if front_close and side_open:
+            self._t_confirm_count += 1
+            print(f"[GREETER] T candidate {self._t_confirm_count}/{T_CONFIRM_SCANS} "
+                  f"F:{safe_round(front)} L:{safe_round(left)} R:{safe_round(right)}")
+            if self._t_confirm_count >= T_CONFIRM_SCANS:
+                print("[GREETER] T-INTERSECTION CONFIRMED")
+                if self._wall_follower:
+                    self._wall_follower.stop()
+                    self._wall_follower = None
+                self.robot.stop_wheels()
+                self._set_state(self.TURNING_TO_DESTINATION)
+        else:
+            self._t_confirm_count = 0
 
-        # Step 2: detect doorway opening (perpendicular jumps far)
-        if not self._wf_opened:
-            if wall > WALL_OPENING_MM:
-                self._wf_opened = True
-                self._opening_time = time.time()
-                print(f"[GREETER] Doorway opening detected (wall at {wall:.0f}mm) - turning corner")
-            return
+    def _handle_turning_to_dest(self, dist):
+        """TURNING_TO_DESTINATION: Turn 90° in place toward the destination.
+        Per current map: bathroom = LEFT, robot lab = RIGHT."""
+        if self._state_elapsed() < TURN_90_DURATION:
+            if self.destination == 'bathroom':
+                # Turn LEFT in place: right wheel forward, left wheel reverse
+                self.robot.drive(-TURN_SPEED, TURN_SPEED)
+            else:
+                # Turn RIGHT in place: left wheel forward, right wheel reverse
+                self.robot.drive(TURN_SPEED, -TURN_SPEED)
+        else:
+            self.robot.stop_wheels()
+            self._set_state(self.FINAL_MOVEMENT)
 
-        # Step 3: wait for corner turn to complete:
-        #   wall reacquired (back below WALL_PRESENT_MM), OR
-        #   CORNER_TURN_TIMEOUT seconds elapsed (doorway has no near wall)
-        if self._corner_turn_time is None:
-            elapsed = time.time() - self._opening_time
-            reacquired = wall < WALL_PRESENT_MM
-            if reacquired or elapsed >= CORNER_TURN_TIMEOUT:
-                self._corner_turn_time = time.time()
-                duration = (BATHROOM_FOLLOW_DURATION if self.destination == 'bathroom'
-                            else LAB_FOLLOW_DURATION)
-                reason = f"wall reacquired at {wall:.0f}mm" if reacquired else f"timeout {CORNER_TURN_TIMEOUT}s"
-                print(f"[GREETER] Corner turned ({reason}) - driving {duration}s more then stopping")
-            return
-
-        # Step 4: count down the post-corner drive duration
-        duration = (BATHROOM_FOLLOW_DURATION if self.destination == 'bathroom'
-                    else LAB_FOLLOW_DURATION)
-        if time.time() - self._corner_turn_time >= duration:
-            print(f"[GREETER] Drive duration ({duration}s) elapsed - stopping")
-            self._wall_follower.stop()
-            self._wall_follower = None
+    def _handle_final_movement(self, dist):
+        """FINAL_MOVEMENT: Drive straight forward for FINAL_DRIVE_DURATION,
+        with front-obstacle stop for safety."""
+        if self._state_elapsed() >= FINAL_DRIVE_DURATION:
             self.robot.stop_wheels()
             self._set_state(self.STOPPED)
+            return
+
+        if dist['front'] < FRONT_STOP_MM:
+            self.robot.stop_wheels()
+        else:
+            self.robot.drive(FORWARD_SPEED, FORWARD_SPEED)
 
     def _handle_stopped(self, dist):
         """STOPPED: Announce arrival."""
