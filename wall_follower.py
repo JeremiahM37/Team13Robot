@@ -61,16 +61,16 @@ from robot_control import RobotController
 LIDAR_PORT = '/dev/ttyUSB0'
 
 # Wall following parameters (mm)
-WALL_TARGET_MM = 750       # Ideal distance from wall (~60cm, good for 2m hallway)
-WALL_TOO_CLOSE_MM = 730    # Steer away below this
-WALL_TOO_FAR_MM = 780      # Steer toward above this
+WALL_TARGET_MM = 800       # Ideal distance from wall (~60cm, good for 2m hallway)
+WALL_TOO_CLOSE_MM = 790    # Steer away below this
+WALL_TOO_FAR_MM = 710      # Steer toward above this
 WALL_LOST_MM = 2000        # Wall considered lost above this
-FRONT_STOP_MM = 600        # Stop if obstacle closer than this in front
+FRONT_STOP_MM = 800        # Stop if obstacle closer than this in front
 
 # Speed settings (0.0 to 1.0)
 FORWARD_SPEED = 0.4         # Base forward speed (was 0.2)
-TURN_SPEED = 0.1            # Turn-in-place speed when front is blocked (was 0.3)
-MAX_STEER_CORRECTION = 0.35  # Cap on PD steering magnitude
+TURN_SPEED = 0.2            # Turn-in-place speed when front is blocked (was 0.3)
+MAX_STEER_CORRECTION = 0.37  # Cap on PD steering magnitude
 SEARCH_TURN_SPEED = 0.2    # Turn speed when searching for lost wall
 
 # PD gains for two-ray wall following. Error terms are in mm; gains convert

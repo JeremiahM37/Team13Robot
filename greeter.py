@@ -55,25 +55,27 @@ TURN_SPEED = 0.7           # In-place rotation speed
 
 # Step durations (seconds) — tune on real robot!
 TURN_180_DURATION = 2.5    # 180° turn time
-TURN_90_DURATION = 1.5     # 90° turn time at the T
-FINAL_DRIVE_DURATION = 5.0 # Forward time after the T turn
+TURN_90_DURATION = 1.0     # Wall follower already turned the corner; no extra rotation
+FINAL_DRIVE_DURATION = 1.0 # Forward time after the 90° corner turn
 
 # Hallway alignment: both side walls must be within this for ALIGNING done
 ALIGN_WALL_MAX_MM = 2000
 ALIGN_TIMEOUT = 4.0        # Give up alignment after this and proceed anyway
 
-# T-intersection detection
-T_FRONT_MM = 600           # Wall in front closer than this
-T_SIDE_OPEN_MM = 1200      # Side wall further than this = opening
-T_CONFIRM_SCANS = 3        # Require N consecutive scans confirming T pattern
+# Corner-turn detection (replaces T-intersection detection):
+# "Wall was close in front (we hit the corner), then far again (wall follower
+# turned the corner)" — that is our 90° pivot event.
+CORNER_APPROACH_MM = 900   # Front wall closer than this = approaching corner
+CORNER_CLEARED_MM  = 1500  # Front wall further than this AFTER approach = turned
+CORNER_CLEARED_SCANS = 1   # Require N consecutive clear scans to confirm
 
 # Front obstacle stop (used during ALIGNING and FINAL_MOVEMENT)
-FRONT_STOP_MM = 400
+FRONT_STOP_MM = 800
 
 LOOP_INTERVAL = 0.1
 
 # Smoothing: median of last N scans per zone
-SCAN_HISTORY = 3
+SCAN_HISTORY = 1
 
 # LIDAR zones (degrees). 0°=front, 90°=RIGHT side, 180°=rear, 270°=LEFT side.
 # (Mirrored convention — see lidar_safety.py header.) WallFollower has its
@@ -201,10 +203,10 @@ class RobotGreeter:
         self.destination = None
         self.state_start_time = time.time()
         self._wall_follower = None
-        # T-intersection detection: require T_CONFIRM_SCANS consecutive scans
-        # showing the T pattern (front wall close + at least one side opening)
-        # to avoid false positives from transient readings.
-        self._t_confirm_count = 0
+        # Corner-turn detection: front-wall must get close (approaching corner),
+        # then become far again (wall follower curved past the corner).
+        self._approached_corner = False
+        self._corner_cleared_count = 0
 
         self._lock = threading.Lock()
         self.distances = {name: float('inf') for name in ZONES}
@@ -355,18 +357,19 @@ class RobotGreeter:
             self._set_state(self.ALIGNING_TO_HALLWAY)
 
     def _handle_aligning(self, dist):
-        """ALIGNING_TO_HALLWAY: Move forward until walls on both sides are
-        within ALIGN_WALL_MAX_MM. Falls through to MOVING_TO_T after
-        ALIGN_TIMEOUT to avoid stalling if a side reading is noisy."""
+        """ALIGNING_TO_HALLWAY: Wait until the followed-side wall is at a
+        usable distance, then hand off to the WallFollower. Falls through
+        after ALIGN_TIMEOUT to avoid stalling on noisy readings."""
         left = dist['left']
         right = dist['right']
         front = dist['front']
 
-        both_walls = left < ALIGN_WALL_MAX_MM and right < ALIGN_WALL_MAX_MM
+        followed = left if self.destination == 'bathroom' else right
+        followed_ready = followed < ALIGN_WALL_MAX_MM
         timed_out = self._state_elapsed() >= ALIGN_TIMEOUT
 
-        if both_walls or timed_out:
-            reason = "walls visible" if both_walls else f"timeout {ALIGN_TIMEOUT}s"
+        if followed_ready or timed_out:
+            reason = "wall visible" if followed_ready else f"timeout {ALIGN_TIMEOUT}s"
             print(f"[GREETER] Hallway aligned ({reason}) "
                   f"L:{safe_round(left)} R:{safe_round(right)}")
             self.robot.stop_wheels()
@@ -378,7 +381,8 @@ class RobotGreeter:
             print(f"[GREETER] Starting wall follower on {side.upper()} side")
             self._wall_follower = WallFollower(self.robot, side=side)
             self._wall_follower.start()
-            self._t_confirm_count = 0
+            self._approached_corner = False
+            self._corner_cleared_count = 0
             self._set_state(self.MOVING_TO_T)
             return
 
@@ -390,31 +394,34 @@ class RobotGreeter:
             self.robot.drive(half, half)
 
     def _handle_moving_to_t(self, dist):
-        """MOVING_TO_T: WallFollower drives down the hallway. We watch our
-        own LIDAR scans for the T-intersection pattern: front wall close
-        (< T_FRONT_MM) AND at least one side open (> T_SIDE_OPEN_MM).
-        T_CONFIRM_SCANS consecutive matches confirm to filter false positives.
+        """MOVING_TO_T: WallFollower drives down the hallway and curves around
+        the 90° corner on its own. We detect that the corner has been cleared
+        by watching the front-wall distance: it must first drop below
+        CORNER_APPROACH_MM (we hit the corner) and then rise back above
+        CORNER_CLEARED_MM for CORNER_CLEARED_SCANS scans (wall follower
+        finished pivoting).
         """
         front = dist['front']
-        left  = dist['left']
-        right = dist['right']
 
-        front_close = front < T_FRONT_MM
-        side_open = left > T_SIDE_OPEN_MM or right > T_SIDE_OPEN_MM
+        if not self._approached_corner:
+            if front < CORNER_APPROACH_MM:
+                self._approached_corner = True
+                print(f"[GREETER] Approaching corner (front={safe_round(front)}mm)")
+            return
 
-        if front_close and side_open:
-            self._t_confirm_count += 1
-            print(f"[GREETER] T candidate {self._t_confirm_count}/{T_CONFIRM_SCANS} "
-                  f"F:{safe_round(front)} L:{safe_round(left)} R:{safe_round(right)}")
-            if self._t_confirm_count >= T_CONFIRM_SCANS:
-                print("[GREETER] T-INTERSECTION CONFIRMED")
+        if front > CORNER_CLEARED_MM:
+            self._corner_cleared_count += 1
+            print(f"[GREETER] Corner clearing {self._corner_cleared_count}/"
+                  f"{CORNER_CLEARED_SCANS} (front={safe_round(front)}mm)")
+            if self._corner_cleared_count >= CORNER_CLEARED_SCANS:
+                print("[GREETER] CORNER TURN COMPLETE")
                 if self._wall_follower:
                     self._wall_follower.stop()
                     self._wall_follower = None
                 self.robot.stop_wheels()
                 self._set_state(self.TURNING_TO_DESTINATION)
         else:
-            self._t_confirm_count = 0
+            self._corner_cleared_count = 0
 
     def _handle_turning_to_dest(self, dist):
         """TURNING_TO_DESTINATION: Turn 90° in place toward the destination.
